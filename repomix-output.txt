@@ -88,7 +88,11 @@ db/db.ts
 db/migrations/0000_freezing_peter_quill.sql
 db/migrations/meta/_journal.json
 db/migrations/meta/0000_snapshot.json
+db/progress-schema.ts
+db/schema/chat-messages-schema.ts
+db/schema/exercises-schema.ts
 db/schema/index.ts
+db/schema/lessons-schema.ts
 db/schema/profiles-schema.ts
 drizzle.config.ts
 lib/hooks/use-copy-to-clipboard.tsx
@@ -3400,20 +3404,53 @@ export const ThemeSwitcher = ({ children, ...props }: ThemeSwitcherProps) => {
 File: db/db.ts
 ================
 /*
-Initializes the database connection and schema for the app.
-*/
+ * Initializes the database connection and schema for the Learn Kannada app.
+ * This file sets up Drizzle ORM with PostgreSQL via Supabase, defining the schema
+ * structure that includes all tables used in the application.
+ *
+ * Key features:
+ * - Connects to Supabase PostgreSQL using DATABASE_URL from .env.local
+ * - Defines the schema object with all application tables
+ *
+ * @dependencies
+ * - drizzle-orm/postgres-js: Drizzle ORM for PostgreSQL
+ * - postgres: PostgreSQL client
+ * - dotenv: Loads environment variables from .env.local
+ * - @/db/schema: Schema definitions for all tables
+ *
+ * @notes
+ * - Do not generate migrations here (per backend rules); migrations are handled externally
+ */
 
-import { profilesTable } from "@/db/schema"
 import { config } from "dotenv"
 import { drizzle } from "drizzle-orm/postgres-js"
 import postgres from "postgres"
 
+// Import existing schemas
+import { profilesTable } from "@/db/schema/profiles-schema"
+import { lessonsTable } from "@/db/schema/lessons-schema"
+import { progressTable } from "@/db/schema/progress-schema"
+import { exercisesTable } from "@/db/schema/exercises-schema" // Updated to real import from type-only
+
+// Import schemas to be defined later (type-only imports to avoid runtime errors until defined)
+import type { chatMessagesTable } from "@/db/schema"
+
+// Load environment variables from .env.local
 config({ path: ".env.local" })
 
-const schema = { profiles: profilesTable }
+// Define the schema object with all tables
+const schema = {
+  profiles: profilesTable,
+  lessons: lessonsTable,
+  progress: progressTable,
+  exercises: exercisesTable, // Added exercises schema
+  chatMessages: chatMessagesTable // Placeholder for chat messages schema (Step 7)
+}
 
+// Initialize PostgreSQL client with the connection string
 const client = postgres(process.env.DATABASE_URL!)
 
+// Export the Drizzle ORM instance with the schema
 export const db = drizzle(client, { schema })
 
 ================
@@ -3532,13 +3569,242 @@ File: db/migrations/meta/0000_snapshot.json
 }
 
 ================
+File: db/progress-schema.ts
+================
+/*
+ * Defines the database schema for user progress in the Learn Kannada app.
+ * This file creates the progress table to track user learning progress, including
+ * XP points, streaks, and badges, with relationships to profiles and lessons.
+ *
+ * Key features:
+ * - Links to profiles and lessons via foreign keys (userId and lessonId)
+ * - Stores XP and streak as integers for gamification
+ * - Uses JSON for badges to support flexible badge structures
+ * - Includes timestamps for creation and updates
+ *
+ * @dependencies
+ * - drizzle-orm/pg-core: Provides PostgreSQL schema definition utilities
+ * - @/db/schema: Imports profilesTable and lessonsTable for foreign key references
+ *
+ * @notes
+ * - No migrations are generated here; handled externally per backend rules
+ * - lessonId is optional (nullable) to allow progress tracking without a specific lesson
+ * - badges defaults to an empty array for new records
+ */
+
+import { integer, json, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import { profilesTable } from "@/db/schema/profiles-schema"
+import { lessonsTable } from "@/db/schema/lessons-schema"
+
+/**
+ * Defines the progress table schema.
+ * This table stores user progress data linked to their profile and optionally a lesson.
+ */
+export const progressTable = pgTable("progress", {
+  id: uuid("id").defaultRandom().primaryKey(), // Unique identifier for each progress record
+  userId: text("user_id")
+    .notNull()
+    .references(() => profilesTable.userId, { onDelete: "cascade" }), // Foreign key to profiles, cascades on delete
+  lessonId: uuid("lesson_id")
+    .references(() => lessonsTable.id, { onDelete: "cascade" }), // Optional foreign key to lessons, cascades on delete
+  xp: integer("xp").default(0).notNull(), // Experience points earned, defaults to 0
+  streak: integer("streak").default(0).notNull(), // Current streak count, defaults to 0
+  badges: json("badges").default([]).notNull(), // Array of badges earned, stored as JSON, defaults to empty array
+  createdAt: timestamp("created_at").defaultNow().notNull(), // Creation timestamp
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()) // Update timestamp on modification
+})
+
+/**
+ * Type definition for inserting a new progress record.
+ * Matches the schema structure for type-safe insertions.
+ */
+export type InsertProgress = typeof progressTable.$inferInsert
+
+/**
+ * Type definition for selecting a progress record.
+ * Matches the schema structure for type-safe queries.
+ */
+export type SelectProgress = typeof progressTable.$inferSelect
+
+================
+File: db/schema/chat-messages-schema.ts
+================
+/*
+ * Defines the database schema for chat messages in the Learn Kannada app.
+ * This file creates the chat_messages table to store peer-to-peer chat messages,
+ * supporting the social feature for learners to practice together.
+ *
+ * Key features:
+ * - Links to profiles via a foreign key (userId) with cascade delete
+ * - Stores message content as text
+ * - Includes a creation timestamp to track when messages were sent
+ *
+ * @dependencies
+ * - drizzle-orm/pg-core: Provides PostgreSQL schema definition utilities
+ * - @/db/schema/profiles-schema: Imports profilesTable for foreign key reference
+ *
+ * @notes
+ * - No migrations are generated here; handled externally per backend rules
+ * - Only createdAt is included per the technical specification; messages are immutable
+ * - userId is required (notNull) to ensure messages are always tied to a user
+ */
+
+import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import { profilesTable } from "@/db/schema/profiles-schema"
+
+/**
+ * Defines the chat messages table schema.
+ * This table stores messages sent between users in the peer-to-peer chat system.
+ */
+export const chatMessagesTable = pgTable("chat_messages", {
+  id: uuid("id").defaultRandom().primaryKey(), // Unique identifier for each message
+  userId: text("user_id")
+    .notNull()
+    .references(() => profilesTable.userId, { onDelete: "cascade" }), // Foreign key to profiles, cascades on delete
+  content: text("content").notNull(), // Message content, required
+  createdAt: timestamp("created_at").defaultNow().notNull() // Creation timestamp
+})
+
+/**
+ * Type definition for inserting a new chat message record.
+ * Matches the schema structure for type-safe insertions.
+ */
+export type InsertChatMessage = typeof chatMessagesTable.$inferInsert
+
+/**
+ * Type definition for selecting a chat message record.
+ * Matches the schema structure for type-safe queries.
+ */
+export type SelectChatMessage = typeof chatMessagesTable.$inferSelect
+
+================
+File: db/schema/exercises-schema.ts
+================
+/*
+ * Defines the database schema for exercises in the Learn Kannada app.
+ * This file creates the exercises table to store interactive exercise data,
+ * such as quizzes, writing, and speaking exercises, linked to lessons.
+ *
+ * Key features:
+ * - Links to lessons via a foreign key (lessonId) with cascade delete
+ * - Uses an enum for exercise types (quiz, writing, speaking)
+ * - Stores exercise content as JSON for structured data (e.g., questions, answers)
+ * - Includes timestamps for creation and updates
+ *
+ * @dependencies
+ * - drizzle-orm/pg-core: Provides PostgreSQL schema definition utilities
+ * - @/db/schema/lessons-schema: Imports lessonsTable for foreign key reference
+ *
+ * @notes
+ * - No migrations are generated here; handled externally per backend rules
+ * - Content is JSON to allow flexible exercise structures
+ * - lessonId is required (notNull) to ensure exercises are always tied to a lesson
+ */
+
+import { json, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import { lessonsTable } from "@/db/schema/lessons-schema"
+
+/**
+ * Defines the exercise type enum.
+ * Represents the possible types of exercises supported by the app.
+ */
+export const exerciseTypeEnum = pgEnum("type", ["quiz", "writing", "speaking"])
+
+/**
+ * Defines the exercises table schema.
+ * This table stores exercise data linked to a specific lesson.
+ */
+export const exercisesTable = pgTable("exercises", {
+  id: uuid("id").defaultRandom().primaryKey(), // Unique identifier for each exercise
+  lessonId: uuid("lesson_id")
+    .notNull()
+    .references(() => lessonsTable.id, { onDelete: "cascade" }), // Foreign key to lessons, cascades on delete
+  type: exerciseTypeEnum("type").notNull(), // Type of exercise (quiz, writing, speaking)
+  content: json("content").notNull(), // JSON content storing exercise details (e.g., questions, prompts)
+  createdAt: timestamp("created_at").defaultNow().notNull(), // Creation timestamp
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()) // Update timestamp on modification
+})
+
+/**
+ * Type definition for inserting a new exercise record.
+ * Matches the schema structure for type-safe insertions.
+ */
+export type InsertExercise = typeof exercisesTable.$inferInsert
+
+/**
+ * Type definition for selecting an exercise record.
+ * Matches the schema structure for type-safe queries.
+ */
+export type SelectExercise = typeof exercisesTable.$inferSelect
+
+================
 File: db/schema/index.ts
 ================
 /*
-Exports the database schema for the app.
-*/
+ * Exports all database schemas for the Learn Kannada app.
+ * This file centralizes schema exports for use in database operations.
+ *
+ * Key features:
+ * - Exports all table definitions for Drizzle ORM integration
+ *
+ * @notes
+ * - Follows project rule to export schemas from a single index file
+ */
 
 export * from "./profiles-schema"
+export * from "./lessons-schema"
+export * from "./progress-schema"
+export * from "./exercises-schema" // Added to align with Step 6 completion
+export * from "./chat-messages-schema" // Added export for chat messages schema
+
+================
+File: db/schema/lessons-schema.ts
+================
+/*
+ * Defines the database schema for lessons in the Learn Kannada app.
+ * This file creates the lessons table to store lesson data, including level,
+ * title, and content, supporting the structured curriculum feature.
+ *
+ * Key features:
+ * - Uses an enum for lesson levels (beginner, intermediate, advanced)
+ * - Stores lesson content as JSON for structured data (grammar, vocab, sentences)
+ * - Includes timestamps for creation and updates
+ *
+ * @dependencies
+ * - drizzle-orm/pg-core: Provides PostgreSQL schema definition utilities
+ *
+ * @notes
+ * - No migrations are generated here; handled externally per backend rules
+ * - Content is JSON to allow flexible lesson structure
+ */
+
+import { json, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+
+// Define the lesson level enum
+export const levelEnum = pgEnum("level", ["beginner", "intermediate", "advanced"])
+
+// Define the lessons table
+export const lessonsTable = pgTable("lessons", {
+  id: uuid("id").defaultRandom().primaryKey(), // Unique identifier for each lesson
+  level: levelEnum("level").notNull(), // Lesson difficulty level (beginner, intermediate, advanced)
+  title: text("title").notNull(), // Human-readable title of the lesson
+  content: json("content").notNull(), // JSON content storing lesson details (e.g., grammar, vocab)
+  createdAt: timestamp("created_at").defaultNow().notNull(), // Creation timestamp
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()) // Update timestamp on modification
+})
+
+// Type definitions for insert and select operations
+export type InsertLesson = typeof lessonsTable.$inferInsert
+export type SelectLesson = typeof lessonsTable.$inferSelect
 
 ================
 File: db/schema/profiles-schema.ts
@@ -3921,7 +4187,7 @@ export default nextConfig
 File: package.json
 ================
 {
-  "name": "receipt-ai",
+  "name": "learn-kannada",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -3971,6 +4237,7 @@ File: package.json
     "@radix-ui/react-toggle": "^1.1.2",
     "@radix-ui/react-toggle-group": "^1.1.2",
     "@radix-ui/react-tooltip": "^1.1.8",
+    "@supabase/supabase-js": "^2.45.6", 
     "@tailwindcss/postcss": "^4.0.6",
     "autoprefixer": "^10.4.20",
     "class-variance-authority": "^0.7.1",
@@ -3984,6 +4251,7 @@ File: package.json
     "lucide-react": "^0.475.0",
     "next": "^15.1.7",
     "next-themes": "^0.4.4",
+    "openai": "^4.68.1", 
     "postcss": "^8.5.2",
     "postgres": "^3.4.5",
     "react": "^19.0",
