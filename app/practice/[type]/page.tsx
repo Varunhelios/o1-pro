@@ -10,9 +10,9 @@ import WritingExercise from "@/components/practice/writing-exercise"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
 
-// Define props correctly without PageProps
+// Explicitly define types for route parameters
 interface PracticePageProps {
-  params: { type: string }
+  params: { type: string } | Promise<{ type: string }> // ✅ Handle Promise
   searchParams?: { lessonId?: string }
 }
 
@@ -91,15 +91,16 @@ export default async function PracticePage({
   params,
   searchParams
 }: PracticePageProps) {
-  // ✅ Marked as `async`
+  const resolvedParams = await params // ✅ Ensure params is awaited
+
   // Ensure params is resolved properly
-  if (!params || !params.type) {
+  if (!resolvedParams || !resolvedParams.type) {
     console.error("No type provided in route params")
     redirect("/learn")
     return null
   }
 
-  const { type } = params
+  const { type } = resolvedParams
   const lessonId = searchParams?.lessonId
 
   // Validate lessonId presence
