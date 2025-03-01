@@ -223,3 +223,54 @@ export async function updateProfileByStripeCustomerIdAction(customerId: string, 
         };
     }
 }
+
+export async function createProfileAction(data: any) {
+    // Implementation for creating a profile
+    try {
+        const newProfile = await db
+            .insert(profilesTable) // Assuming profilesTable is defined
+            .values(data)
+            .returning();
+
+        return {
+            isSuccess: true,
+            message: "Profile created successfully",
+            data: newProfile
+        };
+    } catch (error) {
+        console.error("Error creating profile:", error);
+        return {
+            isSuccess: false,
+            message: "Failed to create profile"
+        };
+    }
+}
+
+export async function getProfileByUserIdAction(userId: string) {
+    // Implementation for retrieving a profile by userId
+    try {
+        const profiles = await db
+            .select()
+            .from(profilesTable)
+            .where(eq(profilesTable.userId, userId));
+
+        if (profiles.length === 0) {
+            return {
+                isSuccess: false,
+                message: "Profile not found"
+            };
+        }
+
+        return {
+            isSuccess: true,
+            message: "Profile retrieved successfully",
+            data: profiles[0] // Return the first profile found
+        };
+    } catch (error) {
+        console.error("Error retrieving profile:", error);
+        return {
+            isSuccess: false,
+            message: "Failed to retrieve profile"
+        };
+    }
+}
