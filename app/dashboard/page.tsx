@@ -1,86 +1,91 @@
 /**
  * @description
- * Dashboard page for the Learn Kannada app. Displays user's progress (XP, streak, badges)
- * with a chart to visualize XP over time.
+ * This server component serves as the dashboard page for the Learn Kannada app.
+ * It fetches user progress data and renders static progress metrics (streak, badges),
+ * delegating the XP chart to a client component for gamification visualization.
+ *
+ * Key features:
+ * - Fetches progress data server-side using getProgressByUserIdAction
+ * - Displays current streak and badges in a responsive layout
+ * - Passes XP data to ProgressChart client component for chart rendering
+ * - Uses Clerk for authentication to secure access
+ * - Implements Suspense for async data fetching with a loading fallback
+ * - Clean, minimalistic UI with Tailwind CSS per design requests
+ *
+ * @dependencies
+ * - @clerk/nextjs/server: For authentication (auth helper)
+ * - @/actions/db/progress-actions: Server action to fetch progress data
+ * - @/components/dashboard/progress-chart: Client component for XP chart
+ * - lucide-react: Provides icons (e.g., Trophy)
+ * - react: For Suspense and ReactNode types
+ *
+ * @notes
+ * - Aggregates total XP and uses latest streak based on createdAt
+ * - Badges are flattened from all entries; assumes they're strings in JSON
+ * - Chart data preparation moved to client component to avoid server-side recharts issues
+ * - Handles edge cases: no user, no progress, fetch errors
  */
+
+"use server"
 
 import { auth } from "@clerk/nextjs/server"
 import { getProgressByUserIdAction } from "@/actions/db/progress-actions"
 import { SelectProgress } from "@/db/schema/progress-schema"
 import { Suspense } from "react"
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer
-} from "recharts"
+import ProgressChart from "@/components/dashboard/progress-chart"
 import { Trophy } from "lucide-react"
 
 /**
- * Fetches user progress securely on the server.
- * Ensures Clerk authentication and fetches progress data.
- */
-async function fetchUserProgress() {
-  const { userId } = await auth()
-  if (!userId) return { userId: null, progress: null }
-
-  const { isSuccess, data } = await getProgressByUserIdAction(userId)
-  return { userId, progress: isSuccess ? data : null }
-}
-
-/**
- * Dashboard Page Component
- * @returns {JSX.Element}
+ * DashboardPage component renders the user dashboard.
+ * @returns {JSX.Element} The dashboard UI with progress data
  */
 export default async function DashboardPage() {
-  const { userId, progress } = await fetchUserProgress()
-
+  // Authenticate user with Clerk
+  const { userId } = await auth()
   if (!userId) {
-    return (
-      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
-        <div className="text-muted-foreground text-center">
-          Please sign in to view your dashboard.
-        </div>
-      </div>
-    )
+    return <div>Please sign in to view your dashboard.</div>
   }
 
   return (
     <Suspense fallback={<LoadingFallback />}>
-      <DashboardContent progress={progress} />
+      <DashboardContent userId={userId} />
     </Suspense>
   )
 }
 
 /**
- * DashboardContent: Displays progress data (XP, streak, badges, chart).
+ * DashboardContent fetches and displays progress data.
+ * @param {Object} props - Contains userId
+ * @param {string} props.userId - The authenticated user's ID
+ * @returns {JSX.Element} The rendered dashboard content
  */
-function DashboardContent({ progress }: { progress: SelectProgress[] | null }) {
-  if (!progress || progress.length === 0) {
+async function DashboardContent({ userId }: { userId: string }) {
+  // Fetch user progress
+  const { isSuccess, message, data } = await getProgressByUserIdAction(userId)
+
+  // Handle fetch failure or no progress data
+  if (!isSuccess || !data || data.length === 0) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
         <div className="text-muted-foreground text-center">
-          No progress yet. Start learning to see your stats!
+          {message || "No progress yet. Start learning to see your stats!"}
         </div>
       </div>
     )
   }
 
   // Process progress data
+  const progress: SelectProgress[] = data
   const totalXP = progress.reduce((sum, entry) => sum + entry.xp, 0)
-  const latestStreak = progress
-    .map(entry => ({
-      streak: entry.streak,
-      date: new Date(entry.createdAt) // Ensure correct Date object
-    }))
-    .sort((a, b) => b.date.getTime() - a.date.getTime())[0].streak
-
+  // Sort by createdAt descending to get the latest streak
+  const latestStreak = progress.sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+  )[0].streak
+  // Flatten badges from all entries
   const badges = progress.flatMap(entry => entry.badges as string[])
+  // Prepare chart data as props
   const chartData = progress.map(entry => ({
-    date: new Date(entry.createdAt).toLocaleDateString(), // Ensure date format
+    date: entry.createdAt.toLocaleDateString(),
     xp: entry.xp
   }))
 
@@ -98,22 +103,7 @@ function DashboardContent({ progress }: { progress: SelectProgress[] | null }) {
         <div className="text-muted-foreground mb-4 text-lg">
           Total XP: {totalXP}
         </div>
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" />
-              <YAxis />
-              <Tooltip />
-              <Line
-                type="monotone"
-                dataKey="xp"
-                stroke="#1E40AF"
-                strokeWidth={2}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+        <ProgressChart chartData={chartData} />
       </div>
 
       {/* Streak Section */}
@@ -157,6 +147,7 @@ function DashboardContent({ progress }: { progress: SelectProgress[] | null }) {
 
 /**
  * LoadingFallback component shows a loading state during data fetching.
+ * @returns {JSX.Element} A centered loading message
  */
 function LoadingFallback() {
   return (
