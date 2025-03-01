@@ -10,6 +10,12 @@ import WritingExercise from "@/components/practice/writing-exercise"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
 
+// Define TypeScript types explicitly
+interface PageProps {
+  params: { type: string }
+  searchParams: { lessonId?: string }
+}
+
 // Skeleton component for loading state
 function PracticeSkeleton() {
   return (
@@ -78,16 +84,13 @@ async function PracticeExerciseFetcher({
 
 /**
  * PracticePage renders the exercise interface for a specific type and lesson.
- * @param {{ params: { type: string }, searchParams: { lessonId?: string } }} props - Route and query params
+ * @param {PageProps} props - Route and query params
  * @returns {JSX.Element} The exercise UI with Suspense boundary
  */
 export default async function PracticePage({
   params,
   searchParams
-}: {
-  params: { type: string }
-  searchParams: { lessonId?: string }
-}) {
+}: PageProps) {
   const { type } = params
   const { lessonId } = searchParams
 
