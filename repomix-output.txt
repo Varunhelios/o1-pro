@@ -3344,7 +3344,12 @@ async function getLessonsByLevelAction(
     const lessons = await db
       .select()
       .from(lessonsTable)
-      .where(eq(lessonsTable.level, level as "beginner" | "intermediate" | "advanced")) // Ensured proper type casting
+      .where(
+        eq(
+          lessonsTable.level,
+          level as "beginner" | "intermediate" | "advanced"
+        )
+      ) // Ensured proper type casting
 
     return {
       isSuccess: true,
@@ -3365,7 +3370,11 @@ async function getLessonsByLevelAction(
  * @param {Promise<{ level: string }>} params - Dynamic route params wrapped in Promise
  * @returns {JSX.Element} The lessons page UI
  */
-export default async function LearnPage({ params }: { params: Promise<LearnPageParams> }) {
+export default async function LearnPage({
+  params
+}: {
+  params: Promise<LearnPageParams>
+}) {
   // Await params as per server component rules
   const { level } = await params
 
@@ -3374,7 +3383,8 @@ export default async function LearnPage({ params }: { params: Promise<LearnPageP
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-muted-foreground text-lg">
-          Invalid level: {level}. Please use beginner, intermediate, or advanced.
+          Invalid level: {level}. Please use beginner, intermediate, or
+          advanced.
         </div>
       </div>
     )
@@ -3415,7 +3425,7 @@ export default async function LearnPage({ params }: { params: Promise<LearnPageP
       {/* Lessons Grid */}
       {lessons.length > 0 ? (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {lessons.map((lesson) => (
+          {lessons.map(lesson => (
             <LessonCard
               key={lesson.id}
               title={lesson.title}
