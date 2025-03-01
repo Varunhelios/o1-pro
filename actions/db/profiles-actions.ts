@@ -35,6 +35,7 @@ import {
   progressTable
 } from "@/db/schema/progress-schema"
 import { ActionState } from "@/types/server-action-types"
+import { profilesTable } from "@/db/schema/profiles-schema"
 
 /**
  * Creates a new progress record for the authenticated user.
@@ -175,4 +176,50 @@ export async function updateProgressAction(
       message: "Failed to update progress due to a server error"
     };
   }
+}
+
+export async function updateProfileAction(userId: string, data: any) {
+    // Implementation for updating a profile based on userId
+    try {
+        const updatedProfile = await db
+            .update(profilesTable) // Now profilesTable should be defined
+            .set(data)
+            .where(eq(profilesTable.userId, userId))
+            .returning();
+
+        return {
+            isSuccess: true,
+            message: "Profile updated successfully",
+            data: updatedProfile
+        };
+    } catch (error) {
+        console.error("Error updating profile:", error);
+        return {
+            isSuccess: false,
+            message: "Failed to update profile"
+        };
+    }
+}
+
+export async function updateProfileByStripeCustomerIdAction(customerId: string, data: any) {
+    // Implementation for updating a profile based on Stripe customer ID
+    try {
+        const updatedProfile = await db
+            .update(profilesTable) // Assuming profilesTable is defined
+            .set(data)
+            .where(eq(profilesTable.stripeCustomerId, customerId))
+            .returning();
+
+        return {
+            isSuccess: true,
+            message: "Profile updated successfully by Stripe customer ID",
+            data: updatedProfile
+        };
+    } catch (error) {
+        console.error("Error updating profile by Stripe customer ID:", error);
+        return {
+            isSuccess: false,
+            message: "Failed to update profile by Stripe customer ID"
+        };
+    }
 }
