@@ -5,7 +5,7 @@ Contains middleware for protecting routes, checking user authentication, and red
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server"
 import { NextResponse } from "next/server"
 
-const isProtectedRoute = createRouteMatcher(["/todo(.*)"])
+const isProtectedRoute = createRouteMatcher(["/todo(.*)", "/practice/(.*)"])
 
 export default clerkMiddleware(async (auth, req) => {
   const { userId, redirectToSignIn } = await auth()
@@ -16,9 +16,7 @@ export default clerkMiddleware(async (auth, req) => {
   }
 
   // If the user is logged in and the route is protected, let them view.
-  if (userId && isProtectedRoute(req)) {
-    return NextResponse.next()
-  }
+  return NextResponse.next()
 })
 
 export const config = {
