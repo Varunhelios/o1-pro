@@ -140,53 +140,39 @@ export async function updateProgressAction(
   data: Partial<Omit<InsertProgress, "id" | "userId" | "createdAt" | "updatedAt">>
 ): Promise<ActionState<SelectProgress>> {
   // Authenticate the user
-  const { userId } = await auth()
+  const { userId } = await auth();
   if (!userId) {
     return {
       isSuccess: false,
       message: "Unauthorized: Please sign in to update progress"
-    }
+    };
   }
 
   try {
-    // Verify the progress record belongs to the authenticated user
-    const existingProgress = await db
-      .select()
-      .from(progressTable)
-      .where(eq(progressTable.id, id))
-      .limit(1)
-
-    if (existingProgress.length === 0) {
-      return {
-        isSuccess: false,
-        message: "Progress record not found"
-      }
-    }
-
-    if (existingProgress[0].userId !== userId) {
-      return {
-        isSuccess: false,
-        message: "Forbidden: You can only update your own progress"
-      }
-    }
-
-    // Update the progress record with provided data
+    // Try to update progress directly and return the updated record
     const [updatedProgress] = await db
       .update(progressTable)
       .set(data)
       .where(eq(progressTable.id, id))
-      .returning()
+      .returning();
+
+    if (!updatedProgress) {
+      return {
+        isSuccess: false,
+        message: "Progress record not found or unauthorized"
+      };
+    }
 
     return {
       isSuccess: true,
       message: "Progress updated successfully",
       data: updatedProgress
-    }
+    };
   } catch (error) {
-    console.error("Error updating progress:", error)
+    console.error("Error updating progress:", error);
     return {
       isSuccess: false,
       message: "Failed to update progress due to a server error"
-    }
+    };
   }
 }
