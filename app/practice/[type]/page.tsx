@@ -87,10 +87,11 @@ async function PracticeExerciseFetcher({
  * @param {PracticePageProps} props - Route and query params
  * @returns {JSX.Element} The exercise UI with Suspense boundary
  */
-export default function PracticePage({
+export default async function PracticePage({
   params,
   searchParams
 }: PracticePageProps) {
+  // ✅ Marked as `async`
   // Ensure params is resolved properly
   if (!params || !params.type) {
     console.error("No type provided in route params")
