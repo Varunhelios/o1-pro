@@ -11,9 +11,9 @@ import { redirect } from "next/navigation"
 import { Suspense } from "react"
 import { NextPage } from "next"
 
-// ✅ Fix: Ensure `params` is resolved properly
+// Define the correct type for `params`
 interface PracticePageProps {
-  params: { type: string } // Define params directly
+  params: { type: string }
   searchParams?: { lessonId?: string }
 }
 
@@ -78,12 +78,18 @@ async function PracticeExerciseFetcher({
   }
 }
 
-// ✅ Fix: Ensure `params` is properly awaited
-export default async function PracticePage({
+// ✅ Fix: Ensure `params` is correctly destructured
+export default function PracticePage({
   params,
   searchParams
 }: PracticePageProps) {
-  const type = params?.type // No need for Awaited here
+  if (!params?.type) {
+    console.error("Invalid params provided")
+    redirect("/learn")
+    return null
+  }
+
+  const { type } = params // Destructure `type` safely
   const lessonId = searchParams?.lessonId
 
   if (!lessonId) {
