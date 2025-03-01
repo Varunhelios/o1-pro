@@ -10,9 +10,9 @@ import WritingExercise from "@/components/practice/writing-exercise"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
 
-// ✅ FIX: Ensure params is always an object
+// ✅ FIX: Force TypeScript to recognize `params` as an object
 interface PracticePageProps {
-  params: { type: string }
+  params: Awaited<{ type: string }>
   searchParams?: { lessonId?: string }
 }
 
@@ -77,10 +77,11 @@ async function PracticeExerciseFetcher({
   }
 }
 
-// ✅ FIX: Use `params` directly instead of awaiting
+// ✅ FIX: Ensure `params` is used correctly
 export default async function PracticePage(props: PracticePageProps) {
-  const { params, searchParams } = props // ✅ No need to await
-  const { type } = params
+  const { params, searchParams } = props
+  const type = params?.type // ✅ Ensures `params` is properly used
+
   const lessonId = searchParams?.lessonId
 
   if (!lessonId) {
