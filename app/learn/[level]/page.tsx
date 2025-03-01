@@ -1,135 +1,146 @@
+/**
+ * @description
+ * This server-side page renders the learning interface for the Learn Kannada app.
+ * It displays lessons for a specific level (beginner, intermediate, advanced) and adjusts
+ * the level dynamically based on user progress using AI recommendations.
+ *
+ * Key features:
+ * - Dynamic routing: Handles lesson level via [level] parameter
+ * - Server-side data fetching: Retrieves lessons and adjusts difficulty
+ * - Suspense: Provides loading states during async operations
+ * - AI-driven adjustment: Redirects to recommended level if progress suggests a mismatch
+ * - Responsive UI: Uses Tailwind CSS for a clean, minimalistic design
+ *
+ * @dependencies
+ * - @/actions/db/lessons-actions: Fetches lessons by level
+ * - @/actions/ai-actions: Adjusts lesson difficulty based on progress
+ * - @/components/learn/lesson-card: Reusable component for lesson display
+ * - @clerk/nextjs/server: Clerk auth for user identification
+ * - react: Suspense for async handling
+ * - next/navigation: Redirects for level adjustment
+ *
+ * @notes
+ * - Requires user authentication via Clerk; redirects to login if unauthenticated
+ * - Fetches all lessons for the requested level unless adjusted by AI
+ * - Skeleton fallback enhances UX during data loading
+ * - Edge case: If no lessons exist for a level, displays a message
+ * - Progress is set to 0 as a placeholder; actual progress integration pending (e.g., Step 24)
+ */
+
 "use server"
 
+import { getLessonsByLevelAction } from "@/actions/db/lessons-actions"
+import { adjustLessonDifficultyAction } from "@/actions/ai-actions"
+import { LessonCard } from "@/components/learn/lesson-card"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
-import { BookOpen } from "lucide-react"
+import { Suspense } from "react"
 
-import { ActionState } from "@/types"
-import { db } from "@/db/db"
-import { lessonsTable, levelEnum } from "@/db/schema/lessons-schema"
-import { LessonCard } from "@/components/learn/lesson-card"
-import { SelectLesson } from "@/db/schema/lessons-schema"
-import { eq } from "drizzle-orm"
+// Skeleton component for loading state
+async function LearnSkeleton() {
+  return (
+    <div className="w-full max-w-4xl p-4">
+      <div className="mb-6 h-8 w-1/2 animate-pulse rounded bg-gray-200" />
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <div
+            key={index}
+            className="h-40 w-full animate-pulse rounded bg-gray-200"
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
 
-// Define params interface for dynamic route
-interface LearnPageParams {
-  level: string
+// Fetcher component to handle async data retrieval and level adjustment
+async function LessonsFetcher({ level }: { level: string }) {
+  // Validate level parameter
+  const validLevels = ["beginner", "intermediate", "advanced"]
+  if (!validLevels.includes(level)) {
+    redirect("/learn/beginner") // Default redirect for invalid levels
+  }
+
+  // Get authenticated user ID from Clerk
+  const { userId } = await auth()
+  if (!userId) {
+    redirect("/login") // Redirect to login if user is not authenticated
+  }
+
+  // Adjust lesson difficulty based on user progress
+  const adjustmentResult = await adjustLessonDifficultyAction(userId)
+  if (adjustmentResult.isSuccess && adjustmentResult.data !== level) {
+    // Redirect to the recommended level if it differs from the requested one
+    redirect(`/learn/${adjustmentResult.data}`)
+  }
+  if (!adjustmentResult.isSuccess) {
+    console.error(
+      "Failed to adjust lesson difficulty:",
+      adjustmentResult.message
+    )
+    // Proceed with requested level as fallback
+  }
+
+  // Fetch lessons for the requested level
+  const { isSuccess, data, message } = await getLessonsByLevelAction(
+    level as "beginner" | "intermediate" | "advanced"
+  )
+  if (!isSuccess || !data) {
+    console.error(`Failed to fetch lessons: ${message}`)
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-muted-foreground">
+          Failed to load lessons. Please try again later.
+        </div>
+      </div>
+    )
+  }
+
+  // Render lessons if available
+  return (
+    <div className="bg-background flex min-h-screen items-center justify-center">
+      <div className="w-full max-w-4xl p-4">
+        <h1 className="text-foreground mb-6 text-2xl font-semibold capitalize">
+          {level} Lessons
+        </h1>
+
+        {data.length > 0 ? (
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {data.map(lesson => (
+              <LessonCard
+                key={lesson.id}
+                title={lesson.title}
+                level={lesson.level}
+                progress={0} // Placeholder; actual progress to be integrated later
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="text-muted-foreground">
+            No lessons available for this level yet.
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 /**
- * Fetches lessons by level from the database.
- * @param {string} level - The lesson level to filter by
- * @returns {Promise<ActionState<SelectLesson[]>>} The lessons or an error state
- */
-async function getLessonsByLevelAction(
-  level: string
-): Promise<ActionState<SelectLesson[]>> {
-  // Validate level against allowed enum values
-  if (!levelEnum.enumValues.includes(level as any)) {
-    return {
-      isSuccess: false,
-      message: "Invalid level. Must be beginner, intermediate, or advanced."
-    }
-  }
-
-  try {
-    const lessons = await db
-      .select()
-      .from(lessonsTable)
-      .where(
-        eq(
-          lessonsTable.level,
-          level as "beginner" | "intermediate" | "advanced"
-        )
-      ) // Ensured proper type casting
-
-    return {
-      isSuccess: true,
-      message: "Lessons retrieved successfully",
-      data: lessons
-    }
-  } catch (error) {
-    console.error("Error fetching lessons:", error)
-    return {
-      isSuccess: false,
-      message: "Failed to fetch lessons"
-    }
-  }
-}
-
-/**
- * LearnPage renders lessons for a specific level.
- * @param {Promise<{ level: string }>} params - Dynamic route params wrapped in Promise
- * @returns {JSX.Element} The lessons page UI
+ * LearnPage renders the lesson interface for a specific level with AI-driven adjustment.
+ * @param {Promise<{ level: string }>} params - Dynamic route params with lesson level
+ * @returns {JSX.Element} The lessons UI with Suspense boundary
  */
 export default async function LearnPage({
   params
 }: {
-  params: Promise<LearnPageParams>
+  params: Promise<{ level: string }>
 }) {
-  // Await params as per server component rules
+  // Await dynamic params
   const { level } = await params
 
-  // Validate level before querying
-  if (!levelEnum.enumValues.includes(level as any)) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-muted-foreground text-lg">
-          Invalid level: {level}. Please use beginner, intermediate, or
-          advanced.
-        </div>
-      </div>
-    )
-  }
-
-  // Check authentication
-  const { userId } = await auth()
-  if (!userId) {
-    return redirect("/login") // Middleware (Step 28) will handle this later
-  }
-
-  // Fetch lessons server-side
-  const lessonResponse = await getLessonsByLevelAction(level)
-
-  // Handle fetch failure
-  if (!lessonResponse.isSuccess || !lessonResponse.data) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-muted-foreground text-lg">
-          {lessonResponse.message || "Unable to load lessons."}
-        </div>
-      </div>
-    )
-  }
-
-  const lessons = lessonResponse.data
-
   return (
-    <div className="container mx-auto p-6">
-      {/* Header */}
-      <div className="mb-8 flex items-center space-x-3">
-        <BookOpen className="text-primary size-8" />
-        <h1 className="text-foreground text-3xl font-bold capitalize">
-          {level} Lessons
-        </h1>
-      </div>
-
-      {/* Lessons Grid */}
-      {lessons.length > 0 ? (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {lessons.map(lesson => (
-            <LessonCard
-              key={lesson.id}
-              title={lesson.title}
-              level={lesson.level}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="text-muted-foreground text-center text-lg">
-          No lessons available for this level yet.
-        </div>
-      )}
-    </div>
+    <Suspense fallback={<LearnSkeleton />}>
+      <LessonsFetcher level={level} />
+    </Suspense>
   )
 }

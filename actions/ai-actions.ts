@@ -1,28 +1,34 @@
 /**
  * @description
  * This file contains server actions for AI-driven features in the Learn Kannada app.
- * It uses the OpenAI client to generate grammar explanations, supporting the AI-Driven Assistance feature.
+ * It uses the OpenAI client to generate grammar explanations and adjust lesson difficulty
+ * based on user progress, supporting the AI-Driven Assistance and Learning Modules features.
  *
  * Key features:
  * - Grammar explanations: Generates concise explanations for Kannada grammar issues
+ * - Lesson difficulty adjustment: Recommends lesson levels based on user performance
  * - Server-side execution: Ensures API key security and compliance with project rules
- * - Error handling: Manages API errors and rate limits gracefully
+ * - Error handling: Manages API errors, rate limits, and data fetch failures gracefully
  *
  * @dependencies
  * - @/lib/ai/openai: Configured OpenAI client for API calls
+ * - @/actions/db/progress-actions: Fetches user progress data
  * - @/types: ActionState type for consistent return values
+ * - @/db/schema/lessons-schema: LevelEnum for type safety in lesson levels
  *
  * @notes
  * - Runs as a server action ("use server") to keep API interactions secure
- * - Assumes input is a Kannada sentence or phrase; may need transliteration support later
- * - Response is limited to 100 tokens for brevity; adjust as needed
+ * - Assumes progress data reflects user performance; may need refinement with more metrics
+ * - Response is limited to a single level recommendation for simplicity
  * - Caches could be added for rate limit mitigation in future iterations
  */
 
 "use server"
 
 import { openai } from "@/lib/ai/openai"
+import { getProgressByUserIdAction } from "@/actions/db/progress-actions"
 import { ActionState } from "@/types"
+import { levelEnum } from "@/db/schema/lessons-schema"
 
 /**
  * Generates an AI-driven grammar explanation for a given sentence or phrase.
@@ -82,6 +88,94 @@ export async function getGrammarExplanationAction(
     return {
       isSuccess: false,
       message: `Failed to generate explanation: ${errorMessage}`
+    }
+  }
+}
+
+/**
+ * Adjusts lesson difficulty based on user progress using AI analysis.
+ * @param userId - The ID of the user whose progress is assessed
+ * @returns {Promise<ActionState<string>>} - Recommended lesson level (beginner, intermediate, advanced) or an error
+ */
+export async function adjustLessonDifficultyAction(
+  userId: string
+): Promise<ActionState<string>> {
+  // Validate userId to ensure it’s provided
+  if (!userId || userId.trim().length === 0) {
+    return {
+      isSuccess: false,
+      message: "User ID cannot be empty"
+    }
+  }
+
+  try {
+    // Fetch user progress from the database
+    const progressResult = await getProgressByUserIdAction(userId)
+    if (!progressResult.isSuccess || !progressResult.data) {
+      return {
+        isSuccess: false,
+        message: "Failed to fetch user progress: " + progressResult.message
+      }
+    }
+
+    const progressData = progressResult.data
+    // Summarize progress metrics for AI analysis
+    const progressSummary = progressData.map(p => ({
+      lessonId: p.lessonId,
+      xp: p.xp,
+      streak: p.streak
+    }))
+    const totalXP = progressData.reduce((sum, p) => sum + p.xp, 0)
+    const maxStreak = Math.max(...progressData.map(p => p.streak), 0)
+
+    // Construct a prompt for OpenAI to recommend a lesson level
+    const prompt = `
+      Based on the following user progress in learning Kannada:
+      - Total XP: ${totalXP}
+      - Maximum streak: ${maxStreak}
+      - Progress details: ${JSON.stringify(progressSummary)}
+      Recommend a lesson difficulty level from: beginner, intermediate, advanced.
+      Return only the level name in lowercase (e.g., "beginner") with no additional text.
+    `
+
+    // Call OpenAI’s chat completion API
+    const response = await openai.chat.completions.create({
+      model: "gpt-4", // Consistent with grammar explanation for quality
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are an AI tutor assessing user progress to recommend Kannada lesson difficulty."
+        },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 10, // Expecting a single word response
+      temperature: 0.5 // Lower temperature for more deterministic output
+    })
+
+    // Extract the recommended level
+    const recommendedLevel = response.choices[0]?.message.content?.trim().toLowerCase()
+    if (!recommendedLevel || !["beginner", "intermediate", "advanced"].includes(recommendedLevel)) {
+      return {
+        isSuccess: false,
+        message: "Invalid or no level recommended by AI"
+      }
+    }
+
+    return {
+      isSuccess: true,
+      message: "Lesson difficulty adjusted successfully",
+      data: recommendedLevel
+    }
+  } catch (error) {
+    // Handle errors from progress fetch or OpenAI API
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error occurred"
+    console.error("Error adjusting lesson difficulty:", errorMessage)
+
+    return {
+      isSuccess: false,
+      message: `Failed to adjust lesson difficulty: ${errorMessage}`
     }
   }
 }

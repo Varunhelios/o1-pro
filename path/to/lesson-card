@@ -1,0 +1,22 @@
+interface LessonCardProps {
+    lesson: {
+        level: "beginner" | "intermediate" | "advanced";
+        id: string;
+        title: string;
+        content: unknown; // Adjust the type as necessary
+        createdAt: Date;
+        updatedAt: Date;
+    };
+}
+
+const LessonCard: React.FC<LessonCardProps> = ({ lesson }) => {
+    // Component implementation...
+    return (
+        <div>
+            <h2>{lesson.title}</h2>
+            {/* Render other lesson details as needed */}
+        </div>
+    );
+}
+
+export default LessonCard; 
