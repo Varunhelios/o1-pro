@@ -32,7 +32,8 @@ async function PracticeExerciseFetcher({
   // Validate exercise type
   const validTypes = ["quiz", "writing", "speaking"]
   if (!validTypes.includes(type)) {
-    return redirect("/learn") // ✅ Fixed
+    redirect("/learn")
+    return null
   }
 
   // Fetch exercises for the lesson
@@ -40,14 +41,16 @@ async function PracticeExerciseFetcher({
     await getExercisesByLessonIdAction(lessonId)
   if (!isSuccess || !data || data.length === 0) {
     console.error(`Failed to fetch exercises: ${message}`)
-    return redirect("/learn") // ✅ Fixed
+    redirect("/learn")
+    return null
   }
 
   // Find the first exercise matching the type
   const exercise = data.find(ex => ex.type === type)
   if (!exercise) {
     console.error(`No ${type} exercise found for lesson ${lessonId}`)
-    return redirect("/learn") // ✅ Fixed
+    redirect("/learn")
+    return null
   }
 
   // Define submission handler
@@ -68,7 +71,8 @@ async function PracticeExerciseFetcher({
     case "speaking":
       return <SpeakingExercise exercise={exercise} onSubmit={handleSubmit} />
     default:
-      return redirect("/learn")
+      redirect("/learn")
+      return null
   }
 }
 
@@ -90,7 +94,8 @@ export default async function PracticePage({
   // Validate lessonId presence
   if (!lessonId) {
     console.error("No lessonId provided in query parameters")
-    return redirect("/learn") // ✅ Fixed
+    redirect("/learn")
+    return null
   }
 
   return (
