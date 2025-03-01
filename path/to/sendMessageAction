@@ -1,0 +1,13 @@
+export async function sendMessageAction(messageData: { userId: string; content: string }): Promise<{ isSuccess: boolean; message?: string }> {
+    // Example implementation (you should replace this with your actual logic)
+    try {
+        // Simulate sending a message (replace with actual sending logic)
+        console.log("Sending message:", messageData);
+
+        // Assuming the message is sent successfully
+        return { isSuccess: true }; // Return success response
+    } catch (error) {
+        console.error("Error sending message:", error);
+        return { isSuccess: false, message: "Failed to send message." }; // Return failure response
+    }
+} 
