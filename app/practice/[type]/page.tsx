@@ -9,11 +9,12 @@ import SpeakingExercise from "@/components/practice/speaking-exercise"
 import WritingExercise from "@/components/practice/writing-exercise"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
+import { NextPage } from "next"
 
-// Explicitly define types for route parameters
+// Define the props interface without extending NextPage
 interface PracticePageProps {
   params: { type: string }
-  searchParams?: { lessonId?: string }
+  searchParams: { lessonId?: string } // Add searchParams to the interface
 }
 
 // Skeleton component for loading state
@@ -91,7 +92,7 @@ export default async function PracticePage({
   params,
   searchParams
 }: PracticePageProps) {
-  // ✅ Marked as `async`
+  // Use PracticePageProps directly
   // Ensure params is resolved properly
   if (!params || !params.type) {
     console.error("No type provided in route params")
