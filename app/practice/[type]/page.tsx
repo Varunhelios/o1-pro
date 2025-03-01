@@ -10,13 +10,13 @@ import WritingExercise from "@/components/practice/writing-exercise"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
 
-// Explicitly define types for route parameters
+// ✅ FIX: Ensure params is always an object
 interface PracticePageProps {
-  params: { type: string } | Promise<{ type: string }> // ✅ Handle Promise
+  params: { type: string }
   searchParams?: { lessonId?: string }
 }
 
-// Skeleton component for loading state
+// Loading state component
 function PracticeSkeleton() {
   return (
     <div className="w-full max-w-lg p-4">
@@ -27,7 +27,7 @@ function PracticeSkeleton() {
   )
 }
 
-// Fetcher component to handle async data retrieval
+// Async component for fetching exercise data
 async function PracticeExerciseFetcher({
   lessonId,
   type
@@ -35,14 +35,12 @@ async function PracticeExerciseFetcher({
   lessonId: string
   type: string
 }) {
-  // Validate exercise type
   const validTypes = ["quiz", "writing", "speaking"]
   if (!validTypes.includes(type)) {
     redirect("/learn")
     return null
   }
 
-  // Fetch exercises for the lesson
   const { isSuccess, data, message } =
     await getExercisesByLessonIdAction(lessonId)
   if (!isSuccess || !data || data.length === 0) {
@@ -51,7 +49,6 @@ async function PracticeExerciseFetcher({
     return null
   }
 
-  // Find the first exercise matching the type
   const exercise = data.find(ex => ex.type === type)
   if (!exercise) {
     console.error(`No ${type} exercise found for lesson ${lessonId}`)
@@ -59,7 +56,6 @@ async function PracticeExerciseFetcher({
     return null
   }
 
-  // Define submission handler
   const handleSubmit = async (response: string): Promise<void> => {
     "use server"
     const result = await submitExerciseAction(exercise.id, { response })
@@ -68,7 +64,6 @@ async function PracticeExerciseFetcher({
     }
   }
 
-  // Render the appropriate exercise component based on type
   switch (type) {
     case "quiz":
       return <QuizExercise exercise={exercise} onSubmit={handleSubmit} />
@@ -82,28 +77,12 @@ async function PracticeExerciseFetcher({
   }
 }
 
-/**
- * PracticePage renders the exercise interface for a specific type and lesson.
- * @param {PracticePageProps} props - Route and query params
- * @returns {JSX.Element} The exercise UI with Suspense boundary
- */
-export default async function PracticePage({
-  params,
-  searchParams
-}: PracticePageProps) {
-  const resolvedParams = await params // ✅ Ensure params is awaited
-
-  // Ensure params is resolved properly
-  if (!resolvedParams || !resolvedParams.type) {
-    console.error("No type provided in route params")
-    redirect("/learn")
-    return null
-  }
-
-  const { type } = resolvedParams
+// ✅ FIX: Use `params` directly instead of awaiting
+export default async function PracticePage(props: PracticePageProps) {
+  const { params, searchParams } = props // ✅ No need to await
+  const { type } = params
   const lessonId = searchParams?.lessonId
 
-  // Validate lessonId presence
   if (!lessonId) {
     console.error("No lessonId provided in query parameters")
     redirect("/learn")
