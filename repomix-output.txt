@@ -78,6 +78,7 @@ app/(marketing)/pricing/page.tsx
 app/api/stripe/webhooks/route.ts
 app/globals.css
 app/layout.tsx
+app/learn/[level]/page.tsx
 app/learn/layout.tsx
 components.json
 components/landing/footer.tsx
@@ -1964,30 +1965,6 @@ export async function submitExerciseAction(
 ================
 File: actions/db/lessons-actions.ts
 ================
-/*
- * Defines server actions for managing lessons in the Learn Kannada app.
- * This file implements CRUD operations (Create, Read, Update, Delete) for the lessons table,
- * supporting the structured curriculum feature by allowing lesson creation, retrieval, modification, and deletion.
- *
- * Key features:
- * - CRUD operations for lessons using Drizzle ORM
- * - Authentication via Clerk to ensure only authorized users can manage lessons
- * - Returns ActionState for consistent success/failure handling
- *
- * @dependencies
- * - @clerk/nextjs/server: Provides auth() for user authentication
- * - drizzle-orm: Provides database query utilities (eq)
- * - @/db/db: Imports the Drizzle database instance
- * - @/db/schema/lessons-schema: Imports lessonsTable and its types
- * - @/types: Imports ActionState type
- *
- * @notes
- * - All actions are server-side only ("use server")
- * - Actions follow CRUD order: Create, Read, Update, Delete
- * - Error handling includes logging and user-friendly messages
- * - Assumes userId is available via Clerk auth for potential future access control
- */
-
 "use server"
 
 import { auth } from "@clerk/nextjs/server"
@@ -1998,84 +1975,62 @@ import { ActionState } from "@/types"
 
 /**
  * Creates a new lesson in the database.
- * @param lesson - The lesson data to insert
- * @returns Promise<ActionState<SelectLesson>> - The result of the create operation
  */
 export async function createLessonAction(
   lesson: InsertLesson
 ): Promise<ActionState<SelectLesson>> {
   try {
     const { userId } = await auth()
-
-    // Check if user is authenticated
     if (!userId) {
       return { isSuccess: false, message: "Unauthorized: You must be logged in to create a lesson" }
     }
 
-    // Validate input (basic check; more could be added based on requirements)
     if (!lesson.title || !lesson.content || !lesson.level) {
       return { isSuccess: false, message: "Missing required fields: title, content, or level" }
     }
 
-    // Insert the lesson into the database
     const [newLesson] = await db.insert(lessonsTable).values(lesson).returning()
-
-    return {
-      isSuccess: true,
-      message: "Lesson created successfully",
-      data: newLesson
-    }
+    return { isSuccess: true, message: "Lesson created successfully", data: newLesson }
   } catch (error) {
     console.error("Error creating lesson:", error)
-    return {
-      isSuccess: false,
-      message: "Failed to create lesson due to a server error"
-    }
+    return { isSuccess: false, message: "Failed to create lesson due to a server error" }
   }
 }
 
 /**
- * Retrieves lessons from the database based on optional level filter.
- * @param level - Optional level to filter lessons (beginner, intermediate, advanced)
- * @returns Promise<ActionState<SelectLesson[]>> - The result of the read operation
+ * Retrieves lessons from the database based on an optional level filter.
  */
 export async function getLessonAction(
   level?: "beginner" | "intermediate" | "advanced"
 ): Promise<ActionState<SelectLesson[]>> {
   try {
     const { userId } = await auth()
-
-    // Check if user is authenticated
     if (!userId) {
       return { isSuccess: false, message: "Unauthorized: You must be logged in to view lessons" }
     }
 
-    // Fetch lessons, optionally filtering by level
-    const lessons = await db
-  .select()
-  .from(lessonsTable)
-  .where(level ? eq(lessonsTable.level, level) : undefined)
+    const lessons = level
+      ? await db.select().from(lessonsTable).where(eq(lessonsTable.level, level))
+      : await db.select().from(lessonsTable)
 
-
-    return {
-      isSuccess: true,
-      message: "Lessons retrieved successfully",
-      data: lessons
-    }
+    return { isSuccess: true, message: "Lessons retrieved successfully", data: lessons }
   } catch (error) {
     console.error("Error getting lessons:", error)
-    return {
-      isSuccess: false,
-      message: "Failed to retrieve lessons due to a server error"
-    }
+    return { isSuccess: false, message: "Failed to retrieve lessons due to a server error" }
   }
 }
 
 /**
+ * Retrieves lessons by level for the Learn Page.
+ */
+export async function getLessonsByLevelAction(
+  level: "beginner" | "intermediate" | "advanced"
+): Promise<ActionState<SelectLesson[]>> {
+  return getLessonAction(level)
+}
+
+/**
  * Updates an existing lesson in the database.
- * @param id - The ID of the lesson to update
- * @param data - Partial lesson data to update
- * @returns Promise<ActionState<SelectLesson>> - The result of the update operation
  */
 export async function updateLessonAction(
   id: string,
@@ -2083,76 +2038,51 @@ export async function updateLessonAction(
 ): Promise<ActionState<SelectLesson>> {
   try {
     const { userId } = await auth()
-
-    // Check if user is authenticated
     if (!userId) {
       return { isSuccess: false, message: "Unauthorized: You must be logged in to update a lesson" }
     }
 
-    // Validate input (ensure at least one field is provided)
     if (Object.keys(data).length === 0) {
       return { isSuccess: false, message: "No data provided to update" }
     }
 
-    // Update the lesson in the database
     const [updatedLesson] = await db
       .update(lessonsTable)
       .set(data)
       .where(eq(lessonsTable.id, id))
       .returning()
 
-    // Check if the lesson was found and updated
     if (!updatedLesson) {
       return { isSuccess: false, message: "Lesson not found" }
     }
 
-    return {
-      isSuccess: true,
-      message: "Lesson updated successfully",
-      data: updatedLesson
-    }
+    return { isSuccess: true, message: "Lesson updated successfully", data: updatedLesson }
   } catch (error) {
     console.error("Error updating lesson:", error)
-    return {
-      isSuccess: false,
-      message: "Failed to update lesson due to a server error"
-    }
+    return { isSuccess: false, message: "Failed to update lesson due to a server error" }
   }
 }
 
 /**
  * Deletes a lesson from the database.
- * @param id - The ID of the lesson to delete
- * @returns Promise<ActionState<void>> - The result of the delete operation
  */
 export async function deleteLessonAction(id: string): Promise<ActionState<void>> {
   try {
     const { userId } = await auth()
-
-    // Check if user is authenticated
     if (!userId) {
       return { isSuccess: false, message: "Unauthorized: You must be logged in to delete a lesson" }
     }
 
-    // Delete the lesson from the database
     const deleted = await db.delete(lessonsTable).where(eq(lessonsTable.id, id)).returning()
 
-    // Check if the lesson was found and deleted
     if (deleted.length === 0) {
       return { isSuccess: false, message: "Lesson not found" }
     }
 
-    return {
-      isSuccess: true,
-      message: "Lesson deleted successfully",
-      data: undefined
-    }
+    return { isSuccess: true, message: "Lesson deleted successfully", data: undefined }
   } catch (error) {
     console.error("Error deleting lesson:", error)
-    return {
-      isSuccess: false,
-      message: "Failed to delete lesson due to a server error"
-    }
+    return { isSuccess: false, message: "Failed to delete lesson due to a server error" }
   }
 }
 
@@ -3370,6 +3300,135 @@ export default async function RootLayout({
         </body>
       </html>
     </ClerkProvider>
+  )
+}
+
+================
+File: app/learn/[level]/page.tsx
+================
+"use server"
+
+import { auth } from "@clerk/nextjs/server"
+import { redirect } from "next/navigation"
+import { BookOpen } from "lucide-react"
+
+import { ActionState } from "@/types"
+import { db } from "@/db/db"
+import { lessonsTable, levelEnum } from "@/db/schema/lessons-schema"
+import { LessonCard } from "@/components/learn/lesson-card"
+import { SelectLesson } from "@/db/schema/lessons-schema"
+import { eq } from "drizzle-orm"
+
+// Define params interface for dynamic route
+interface LearnPageParams {
+  level: string
+}
+
+/**
+ * Fetches lessons by level from the database.
+ * @param {string} level - The lesson level to filter by
+ * @returns {Promise<ActionState<SelectLesson[]>>} The lessons or an error state
+ */
+async function getLessonsByLevelAction(
+  level: string
+): Promise<ActionState<SelectLesson[]>> {
+  // Validate level against allowed enum values
+  if (!levelEnum.enumValues.includes(level as any)) {
+    return {
+      isSuccess: false,
+      message: "Invalid level. Must be beginner, intermediate, or advanced."
+    }
+  }
+
+  try {
+    const lessons = await db
+      .select()
+      .from(lessonsTable)
+      .where(eq(lessonsTable.level, level as "beginner" | "intermediate" | "advanced")) // Ensured proper type casting
+
+    return {
+      isSuccess: true,
+      message: "Lessons retrieved successfully",
+      data: lessons
+    }
+  } catch (error) {
+    console.error("Error fetching lessons:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to fetch lessons"
+    }
+  }
+}
+
+/**
+ * LearnPage renders lessons for a specific level.
+ * @param {Promise<{ level: string }>} params - Dynamic route params wrapped in Promise
+ * @returns {JSX.Element} The lessons page UI
+ */
+export default async function LearnPage({ params }: { params: Promise<LearnPageParams> }) {
+  // Await params as per server component rules
+  const { level } = await params
+
+  // Validate level before querying
+  if (!levelEnum.enumValues.includes(level as any)) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-muted-foreground text-lg">
+          Invalid level: {level}. Please use beginner, intermediate, or advanced.
+        </div>
+      </div>
+    )
+  }
+
+  // Check authentication
+  const { userId } = await auth()
+  if (!userId) {
+    return redirect("/login") // Middleware (Step 28) will handle this later
+  }
+
+  // Fetch lessons server-side
+  const lessonResponse = await getLessonsByLevelAction(level)
+
+  // Handle fetch failure
+  if (!lessonResponse.isSuccess || !lessonResponse.data) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-muted-foreground text-lg">
+          {lessonResponse.message || "Unable to load lessons."}
+        </div>
+      </div>
+    )
+  }
+
+  const lessons = lessonResponse.data
+
+  return (
+    <div className="container mx-auto p-6">
+      {/* Header */}
+      <div className="mb-8 flex items-center space-x-3">
+        <BookOpen className="text-primary size-8" />
+        <h1 className="text-foreground text-3xl font-bold capitalize">
+          {level} Lessons
+        </h1>
+      </div>
+
+      {/* Lessons Grid */}
+      {lessons.length > 0 ? (
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {lessons.map((lesson) => (
+            <LessonCard
+              key={lesson.id}
+              title={lesson.title}
+              level={lesson.level}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="text-muted-foreground text-center text-lg">
+          No lessons available for this level yet.
+        </div>
+      )}
+    </div>
   )
 }
 
