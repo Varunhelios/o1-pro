@@ -1,33 +1,8 @@
 /**
  * @description
- * This server component serves as the dashboard page for the Learn Kannada app.
- * It displays the authenticated user's progress, including total XP, current streak,
- * and earned badges, with a chart to visualize XP over time for gamification.
- *
- * Key features:
- * - Fetches progress data server-side using getProgressByUserIdAction
- * - Visualizes XP with a Recharts LineChart
- * - Displays current streak and badges in a responsive layout
- * - Uses Clerk for authentication to secure access
- * - Implements Suspense for async data fetching with a loading fallback
- * - Clean, minimalistic UI with Tailwind CSS per design requests
- *
- * @dependencies
- * - @clerk/nextjs/server: For authentication (auth helper)
- * - @/actions/db/progress-actions: Server action to fetch progress data
- * - recharts: For rendering the XP progress chart
- * - lucide-react: Provides icons (e.g., Trophy)
- * - react: For Suspense and ReactNode types
- *
- * @notes
- * - Aggregates total XP from all progress entries
- * - Uses the latest streak based on the most recent entry’s createdAt
- * - Badges are flattened from all entries; assumes they’re strings in JSON
- * - Chart plots XP by date; assumes createdAt is reliable for ordering
- * - Handles edge cases: no user, no progress, fetch errors
+ * Dashboard page for the Learn Kannada app. Displays user's progress (XP, streak, badges)
+ * with a chart to visualize XP over time.
  */
-
-"use server"
 
 import { auth } from "@clerk/nextjs/server"
 import { getProgressByUserIdAction } from "@/actions/db/progress-actions"
@@ -45,58 +20,67 @@ import {
 import { Trophy } from "lucide-react"
 
 /**
- * DashboardPage component renders the user dashboard.
- * @returns {JSX.Element} The dashboard UI with progress data
+ * Fetches user progress securely on the server.
+ * Ensures Clerk authentication and fetches progress data.
+ */
+async function fetchUserProgress() {
+  const { userId } = await auth()
+  if (!userId) return { userId: null, progress: null }
+
+  const { isSuccess, data } = await getProgressByUserIdAction(userId)
+  return { userId, progress: isSuccess ? data : null }
+}
+
+/**
+ * Dashboard Page Component
+ * @returns {JSX.Element}
  */
 export default async function DashboardPage() {
-  // Authenticate user with Clerk
-  const { userId } = await auth()
+  const { userId, progress } = await fetchUserProgress()
+
   if (!userId) {
-    // Fallback if middleware fails; normally handled by middleware.ts
-    return <div>Please sign in to view your dashboard.</div>
+    return (
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
+        <div className="text-muted-foreground text-center">
+          Please sign in to view your dashboard.
+        </div>
+      </div>
+    )
   }
 
   return (
     <Suspense fallback={<LoadingFallback />}>
-      <DashboardContent userId={userId} />
+      <DashboardContent progress={progress} />
     </Suspense>
   )
 }
 
 /**
- * DashboardContent fetches and displays progress data.
- * @param {Object} props - Contains userId
- * @param {string} props.userId - The authenticated user's ID
- * @returns {JSX.Element} The rendered dashboard content
+ * DashboardContent: Displays progress data (XP, streak, badges, chart).
  */
-async function DashboardContent({ userId }: { userId: string }) {
-  // Fetch user progress
-  const { isSuccess, message, data } = await getProgressByUserIdAction(userId)
-
-  // Handle fetch failure or no progress data
-  if (!isSuccess || !data || data.length === 0) {
+function DashboardContent({ progress }: { progress: SelectProgress[] | null }) {
+  if (!progress || progress.length === 0) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
         <div className="text-muted-foreground text-center">
-          {message || "No progress yet. Start learning to see your stats!"}
+          No progress yet. Start learning to see your stats!
         </div>
       </div>
     )
   }
 
   // Process progress data
-  const progress: SelectProgress[] = data
   const totalXP = progress.reduce((sum, entry) => sum + entry.xp, 0)
-  // Sort by createdAt descending to get the latest streak
-  const latestStreak = progress.sort(
-    (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-  )[0].streak
-  // Flatten badges from all entries; assumes badges are strings in JSON array
-  const badges = progress.flatMap(entry => entry.badges as string[])
+  const latestStreak = progress
+    .map(entry => ({
+      streak: entry.streak,
+      date: new Date(entry.createdAt) // Ensure correct Date object
+    }))
+    .sort((a, b) => b.date.getTime() - a.date.getTime())[0].streak
 
-  // Prepare data for XP chart
+  const badges = progress.flatMap(entry => entry.badges as string[])
   const chartData = progress.map(entry => ({
-    date: entry.createdAt.toLocaleDateString(),
+    date: new Date(entry.createdAt).toLocaleDateString(), // Ensure date format
     xp: entry.xp
   }))
 
@@ -124,7 +108,7 @@ async function DashboardContent({ userId }: { userId: string }) {
               <Line
                 type="monotone"
                 dataKey="xp"
-                stroke="#1E40AF" // Matches design system primary color
+                stroke="#1E40AF"
                 strokeWidth={2}
               />
             </LineChart>
@@ -173,7 +157,6 @@ async function DashboardContent({ userId }: { userId: string }) {
 
 /**
  * LoadingFallback component shows a loading state during data fetching.
- * @returns {JSX.Element} A centered loading message
  */
 function LoadingFallback() {
   return (
