@@ -35,6 +35,7 @@ import { LessonCard } from "@/components/learn/lesson-card"
 import { auth } from "@clerk/nextjs/server"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
+import PronunciationGuide from "@/components/learn/pronunciation-guide"
 
 // Skeleton component for loading state
 async function LearnSkeleton() {
@@ -141,6 +142,27 @@ export default async function LearnPage({
   return (
     <Suspense fallback={<LearnSkeleton />}>
       <LessonsFetcher level={level} />
+      {/* Pronunciation Guide Component */}
+      <PronunciationGuide
+        phrase="ನಮಸ್ಕಾರ"
+        onSubmit={handlePronunciationSubmit}
+      />
     </Suspense>
   )
 }
+
+// Function to handle speech input
+const handlePronunciationSubmit = async (transcript: string) => {
+  console.log("User said:", transcript)
+  const phrase = "ನಮಸ್ಕಾರ" // "Namaskara" means "Hello" in Kannada
+
+  if (transcript.trim().toLowerCase() === phrase.toLowerCase()) {
+    alert("✅ Correct pronunciation!")
+  } else {
+    alert("❌ Try again!")
+  }
+}
+
+;("use client")
+
+import { useState } from "react"
