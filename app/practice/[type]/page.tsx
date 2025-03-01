@@ -9,9 +9,8 @@ import SpeakingExercise from "@/components/practice/speaking-exercise"
 import WritingExercise from "@/components/practice/writing-exercise"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
-import { NextPage } from "next"
 
-// Define the correct type for `params`
+// ✅ Ensure params type is correctly defined
 interface PracticePageProps {
   params: { type: string }
   searchParams?: { lessonId?: string }
@@ -78,8 +77,8 @@ async function PracticeExerciseFetcher({
   }
 }
 
-// ✅ Fix: Ensure `params` is correctly destructured
-export default function PracticePage({
+// ✅ Fix: Make PracticePage async to support redirect
+export default async function PracticePage({
   params,
   searchParams
 }: PracticePageProps) {
@@ -89,7 +88,7 @@ export default function PracticePage({
     return null
   }
 
-  const { type } = params // Destructure `type` safely
+  const { type } = params
   const lessonId = searchParams?.lessonId
 
   if (!lessonId) {
