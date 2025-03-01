@@ -86,6 +86,9 @@ components/landing/hero.tsx
 components/learn/lesson-card.tsx
 components/magicui/animated-gradient-text.tsx
 components/magicui/hero-video-dialog.tsx
+components/practice/quiz-exercise.tsx
+components/practice/speaking-exercise.tsx
+components/practice/writing-exercise.tsx
 components/utilities/providers.tsx
 components/utilities/tailwind-indicator.tsx
 components/utilities/theme-switcher.tsx
@@ -4173,6 +4176,470 @@ export default function HeroVideoDialog({
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+================
+File: components/practice/quiz-exercise.tsx
+================
+/**
+ * @description
+ * This client-side component renders a multiple-choice quiz exercise for the Learn Kannada app.
+ * It displays a question with selectable options and handles submission to evaluate user answers.
+ * Designed for use in /practice/[type]/page.tsx to support interactive learning.
+ *
+ * Key features:
+ * - Displays a single question with multiple-choice options using radio buttons
+ * - Manages form state and submission with React Hook Form
+ * - Clean, responsive UI with Tailwind CSS and Shadcn components
+ * - Submits selected answer to a provided handler function
+ *
+ * @dependencies
+ * - @/components/ui/button: Shadcn Button for submission
+ * - @/components/ui/form: Shadcn Form components for form structure
+ * - @/components/ui/radio-group: Shadcn RadioGroup for options
+ * - @/db/schema/exercises-schema: Imports SelectExercise for type safety
+ * - react-hook-form: Manages form state and validation
+ * - lucide-react: Provides icons (e.g., Check)
+ *
+ * @notes
+ * - Requires a parent component to fetch exercise data and pass it as props
+ * - Assumes content JSON has a question and options array
+ * - Submission handler is expected to call a server action (e.g., submitExerciseAction)
+ * - No direct server actions here; adheres to client component rules
+ * - Handles edge case of missing/invalid content gracefully
+ */
+
+"use client"
+
+import { Button } from "@/components/ui/button"
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage
+} from "@/components/ui/form"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { SelectExercise } from "@/db/schema/exercises-schema"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { Check } from "lucide-react"
+import { useForm } from "react-hook-form"
+import * as z from "zod"
+
+// Define form schema for validation
+const quizFormSchema = z.object({
+  answer: z.string().min(1, "Please select an answer")
+})
+
+// Infer form type from schema
+type QuizFormValues = z.infer<typeof quizFormSchema>
+
+// Define props interface
+interface QuizExerciseProps {
+  exercise: SelectExercise // Exercise data from database
+  onSubmit: (answer: string) => Promise<void> // Handler to process submission
+}
+
+/**
+ * QuizExercise component renders a multiple-choice quiz UI.
+ * @param {QuizExerciseProps} props - Exercise data and submission handler
+ * @returns {JSX.Element} A form with question and radio options
+ */
+export default function QuizExercise({
+  exercise,
+  onSubmit
+}: QuizExerciseProps) {
+  // Parse exercise content (assuming JSON structure: { question: string, options: string[] })
+  const content = exercise.content as { question: string; options: string[] }
+  const question = content?.question ?? "No question available"
+  const options = content?.options ?? []
+
+  // Initialize form with React Hook Form
+  const form = useForm<QuizFormValues>({
+    resolver: zodResolver(quizFormSchema),
+    defaultValues: { answer: "" }
+  })
+
+  // Handle form submission
+  const handleSubmit = async (data: QuizFormValues) => {
+    await onSubmit(data.answer)
+  }
+
+  return (
+    <div className="w-full max-w-lg p-4">
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+          {/* Question display */}
+          <div className="text-foreground text-lg font-medium">{question}</div>
+
+          {/* Options */}
+          <FormField
+            control={form.control}
+            name="answer"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="sr-only">Select an answer</FormLabel>
+                <FormControl>
+                  <RadioGroup
+                    onValueChange={field.onChange}
+                    value={field.value}
+                    className="space-y-2"
+                  >
+                    {options.length > 0 ? (
+                      options.map((option, index) => (
+                        <FormItem
+                          key={index}
+                          className="flex items-center space-x-3"
+                        >
+                          <FormControl>
+                            <RadioGroupItem
+                              value={option}
+                              id={`option-${index}`}
+                            />
+                          </FormControl>
+                          <FormLabel
+                            htmlFor={`option-${index}`}
+                            className="text-foreground"
+                          >
+                            {option}
+                          </FormLabel>
+                        </FormItem>
+                      ))
+                    ) : (
+                      <div className="text-muted-foreground">
+                        No options available
+                      </div>
+                    )}
+                  </RadioGroup>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          {/* Submit button */}
+          <Button
+            type="submit"
+            disabled={form.formState.isSubmitting || !form.formState.isValid}
+            className="w-full"
+          >
+            <Check className="mr-2 size-4" />
+            Submit Answer
+          </Button>
+        </form>
+      </Form>
+    </div>
+  )
+}
+
+================
+File: components/practice/speaking-exercise.tsx
+================
+/**
+ * @description
+ * This client-side component renders a speaking exercise UI for the Learn Kannada app.
+ * It uses the Web Speech API to record and transcribe user speech for pronunciation practice.
+ * Designed for use in /practice/[type]/page.tsx to support interactive learning.
+ *
+ * Key features:
+ * - Displays a phrase for the user to speak
+ * - Records and transcribes speech using Web Speech API
+ * - Clean, responsive UI with Tailwind CSS and Shadcn components
+ * - Submits transcript to a provided handler function
+ *
+ * @dependencies
+ * - @/components/ui/button: Shadcn Button for recording and submission
+ * - @/components/ui/textarea: Shadcn Textarea for transcript display
+ * - @/db/schema/exercises-schema: Imports SelectExercise for type safety
+ * - lucide-react: Provides icons (e.g., Mic, Send)
+ *
+ * @notes
+ * - Requires browser support for Web Speech API (SpeechRecognition)
+ * - Fallback message if API is unavailable
+ * - Assumes content JSON has a phrase string
+ * - Submission handler is expected to call a server action (e.g., assessPronunciationAction)
+ * - Handles edge cases like API unavailability and empty transcripts
+ */
+
+"use client"
+
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { SelectExercise } from "@/db/schema/exercises-schema"
+import { Mic, Send } from "lucide-react"
+import { useState } from "react"
+
+// Add this interface declaration at the top of the file
+declare global {
+  interface Window {
+    SpeechRecognition: any
+    webkitSpeechRecognition: any
+  }
+}
+
+// Declare SpeechRecognition type (not included in TS by default)
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  start: () => void
+  stop: () => void
+  onresult: (event: SpeechRecognitionEvent) => void
+  onerror: (event: SpeechRecognitionErrorEvent) => void
+}
+
+interface SpeechRecognitionEvent {
+  results: SpeechRecognitionResultList
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string
+}
+
+// Define props interface
+interface SpeakingExerciseProps {
+  exercise: SelectExercise // Exercise data from database
+  onSubmit: (transcript: string) => Promise<void> // Handler to process submission
+}
+
+/**
+ * SpeakingExercise component renders a speaking exercise UI.
+ * @param {SpeakingExerciseProps} props - Exercise data and submission handler
+ * @returns {JSX.Element} A UI with phrase, recording controls, and transcript
+ */
+export default function SpeakingExercise({
+  exercise,
+  onSubmit
+}: SpeakingExerciseProps) {
+  // Parse exercise content (assuming JSON structure: { phrase: string })
+  const content = exercise.content as { phrase: string }
+  const phrase = content?.phrase ?? "No phrase available"
+
+  // State for recording and transcript
+  const [isRecording, setIsRecording] = useState(false)
+  const [transcript, setTranscript] = useState("")
+  const [isSupported, setIsSupported] = useState(true)
+
+  // Initialize SpeechRecognition
+  const SpeechRecognition = (window.SpeechRecognition ||
+    window.webkitSpeechRecognition) as (new () => SpeechRecognition) | undefined
+  const recognition = SpeechRecognition ? new SpeechRecognition() : null
+
+  // Configure recognition if available
+  if (recognition) {
+    recognition.continuous = false
+    recognition.interimResults = false
+    recognition.lang = "kn-IN" // Kannada language code
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const result = event.results[0][0].transcript
+      setTranscript(result)
+      setIsRecording(false)
+    }
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      console.error("Speech recognition error:", event.error)
+      setIsRecording(false)
+      setTranscript("Error recording speech. Please try again.")
+    }
+  } else {
+    setIsSupported(false)
+  }
+
+  // Handle recording toggle
+  const toggleRecording = () => {
+    if (!recognition) return
+
+    if (isRecording) {
+      recognition.stop()
+    } else {
+      setTranscript("")
+      recognition.start()
+      setIsRecording(true)
+    }
+  }
+
+  // Handle submission
+  const handleSubmit = async () => {
+    if (transcript.trim()) {
+      await onSubmit(transcript)
+      setTranscript("") // Reset after submission
+    }
+  }
+
+  return (
+    <div className="w-full max-w-lg space-y-6 p-4">
+      {/* Phrase display */}
+      <div className="text-foreground text-lg font-medium">{phrase}</div>
+
+      {/* Recording controls */}
+      {isSupported ? (
+        <>
+          <Button
+            onClick={toggleRecording}
+            disabled={!recognition}
+            className="w-full"
+            variant={isRecording ? "destructive" : "default"}
+          >
+            <Mic className="mr-2 size-4" />
+            {isRecording ? "Stop Recording" : "Start Recording"}
+          </Button>
+
+          {/* Transcript display */}
+          <Textarea
+            value={transcript}
+            onChange={e => setTranscript(e.target.value)}
+            placeholder="Your speech will appear here..."
+            className="h-32 resize-none"
+            readOnly={isRecording}
+          />
+
+          {/* Submit button */}
+          <Button
+            onClick={handleSubmit}
+            disabled={!transcript.trim() || isRecording}
+            className="w-full"
+          >
+            <Send className="mr-2 size-4" />
+            Submit Speech
+          </Button>
+        </>
+      ) : (
+        <div className="text-muted-foreground">
+          Speech recognition is not supported in your browser.
+        </div>
+      )}
+    </div>
+  )
+}
+
+================
+File: components/practice/writing-exercise.tsx
+================
+/**
+ * @description
+ * This client-side component renders a writing exercise UI for the Learn Kannada app.
+ * It provides a textarea for users to input text and submits it for evaluation.
+ * Designed for use in /practice/[type]/page.tsx to support interactive learning.
+ *
+ * Key features:
+ * - Displays a writing prompt with a textarea for user response
+ * - Manages form state and submission with React Hook Form
+ * - Clean, responsive UI with Tailwind CSS and Shadcn components
+ * - Submits user text to a provided handler function
+ *
+ * @dependencies
+ * - @/components/ui/button: Shadcn Button for submission
+ * - @/components/ui/form: Shadcn Form components for form structure
+ * - @/components/ui/textarea: Shadcn Textarea for user input
+ * - @/db/schema/exercises-schema: Imports SelectExercise for type safety
+ * - react-hook-form: Manages form state and validation
+ * - lucide-react: Provides icons (e.g., Check)
+ *
+ * @notes
+ * - Requires a parent component to fetch exercise data and pass it as props
+ * - Assumes content JSON has a prompt string
+ * - Submission handler is expected to call a server action (e.g., submitExerciseAction)
+ * - No direct server actions here; adheres to client component rules
+ * - Handles edge case of missing/invalid content
+ */
+
+"use client"
+
+import { Button } from "@/components/ui/button"
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage
+} from "@/components/ui/form"
+import { Textarea } from "@/components/ui/textarea"
+import { SelectExercise } from "@/db/schema/exercises-schema"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { Check } from "lucide-react"
+import { useForm } from "react-hook-form"
+import * as z from "zod"
+
+// Define form schema for validation
+const writingFormSchema = z.object({
+  response: z.string().min(1, "Please enter your response")
+})
+
+// Infer form type from schema
+type WritingFormValues = z.infer<typeof writingFormSchema>
+
+// Define props interface
+interface WritingExerciseProps {
+  exercise: SelectExercise // Exercise data from database
+  onSubmit: (response: string) => Promise<void> // Handler to process submission
+}
+
+/**
+ * WritingExercise component renders a writing exercise UI.
+ * @param {WritingExerciseProps} props - Exercise data and submission handler
+ * @returns {JSX.Element} A form with prompt and textarea
+ */
+export default function WritingExercise({
+  exercise,
+  onSubmit
+}: WritingExerciseProps) {
+  // Parse exercise content (assuming JSON structure: { prompt: string })
+  const content = exercise.content as { prompt: string }
+  const prompt = content?.prompt ?? "No prompt available"
+
+  // Initialize form with React Hook Form
+  const form = useForm<WritingFormValues>({
+    resolver: zodResolver(writingFormSchema),
+    defaultValues: { response: "" }
+  })
+
+  // Handle form submission
+  const handleSubmit = async (data: WritingFormValues) => {
+    await onSubmit(data.response)
+  }
+
+  return (
+    <div className="w-full max-w-lg p-4">
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+          {/* Prompt display */}
+          <div className="text-foreground text-lg font-medium">{prompt}</div>
+
+          {/* Textarea */}
+          <FormField
+            control={form.control}
+            name="response"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="sr-only">Your response</FormLabel>
+                <FormControl>
+                  <Textarea
+                    placeholder="Type your response here..."
+                    className="h-32 resize-none"
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          {/* Submit button */}
+          <Button
+            type="submit"
+            disabled={form.formState.isSubmitting || !form.formState.isValid}
+            className="w-full"
+          >
+            <Check className="mr-2 size-4" />
+            Submit Response
+          </Button>
+        </form>
+      </Form>
     </div>
   )
 }
