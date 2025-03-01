@@ -9,14 +9,15 @@ import SpeakingExercise from "@/components/practice/speaking-exercise"
 import WritingExercise from "@/components/practice/writing-exercise"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
+import { NextPage } from "next"
 
-// ✅ FIX: Force TypeScript to recognize `params` as an object
+// ✅ Fix: Ensure `params` is resolved properly
 interface PracticePageProps {
-  params: Awaited<{ type: string }>
+  params: { type: string } // Define params directly
   searchParams?: { lessonId?: string }
 }
 
-// Loading state component
+// Loading skeleton component
 function PracticeSkeleton() {
   return (
     <div className="w-full max-w-lg p-4">
@@ -27,7 +28,7 @@ function PracticeSkeleton() {
   )
 }
 
-// Async component for fetching exercise data
+// Fetching and handling exercises
 async function PracticeExerciseFetcher({
   lessonId,
   type
@@ -77,11 +78,12 @@ async function PracticeExerciseFetcher({
   }
 }
 
-// ✅ FIX: Ensure `params` is used correctly
-export default async function PracticePage(props: PracticePageProps) {
-  const { params, searchParams } = props
-  const type = params?.type // ✅ Ensures `params` is properly used
-
+// ✅ Fix: Ensure `params` is properly awaited
+export default async function PracticePage({
+  params,
+  searchParams
+}: PracticePageProps) {
+  const type = params?.type // No need for Awaited here
   const lessonId = searchParams?.lessonId
 
   if (!lessonId) {
