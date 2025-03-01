@@ -99,7 +99,7 @@ export default async function PracticePage({
     return null
   }
 
-  const { type } = params // Use params directly
+  const { type } = params
   const lessonId = searchParams?.lessonId
 
   // Validate lessonId presence
