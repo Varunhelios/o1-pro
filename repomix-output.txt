@@ -60,6 +60,7 @@ Directory Structure
 .gitignore
 .husky/pre-commit
 .repo_ignore
+actions/db/lessons-actions.ts
 actions/db/profiles-actions.ts
 actions/stripe-actions.ts
 app/(auth)/layout.tsx
@@ -88,12 +89,12 @@ db/db.ts
 db/migrations/0000_freezing_peter_quill.sql
 db/migrations/meta/_journal.json
 db/migrations/meta/0000_snapshot.json
-db/progress-schema.ts
 db/schema/chat-messages-schema.ts
 db/schema/exercises-schema.ts
 db/schema/index.ts
 db/schema/lessons-schema.ts
 db/schema/profiles-schema.ts
+db/schema/progress-schema.ts
 drizzle.config.ts
 lib/hooks/use-copy-to-clipboard.tsx
 lib/hooks/use-mobile.tsx
@@ -1625,132 +1626,391 @@ File: .repo_ignore
 README.md
 
 ================
-File: actions/db/profiles-actions.ts
+File: actions/db/lessons-actions.ts
 ================
 /*
-Contains server actions related to profiles in the DB.
-*/
+ * Defines server actions for managing lessons in the Learn Kannada app.
+ * This file implements CRUD operations (Create, Read, Update, Delete) for the lessons table,
+ * supporting the structured curriculum feature by allowing lesson creation, retrieval, modification, and deletion.
+ *
+ * Key features:
+ * - CRUD operations for lessons using Drizzle ORM
+ * - Authentication via Clerk to ensure only authorized users can manage lessons
+ * - Returns ActionState for consistent success/failure handling
+ *
+ * @dependencies
+ * - @clerk/nextjs/server: Provides auth() for user authentication
+ * - drizzle-orm: Provides database query utilities (eq)
+ * - @/db/db: Imports the Drizzle database instance
+ * - @/db/schema/lessons-schema: Imports lessonsTable and its types
+ * - @/types: Imports ActionState type
+ *
+ * @notes
+ * - All actions are server-side only ("use server")
+ * - Actions follow CRUD order: Create, Read, Update, Delete
+ * - Error handling includes logging and user-friendly messages
+ * - Assumes userId is available via Clerk auth for potential future access control
+ */
 
 "use server"
 
-import { db } from "@/db/db"
-import {
-  InsertProfile,
-  profilesTable,
-  SelectProfile
-} from "@/db/schema/profiles-schema"
-import { ActionState } from "@/types"
+import { auth } from "@clerk/nextjs/server"
 import { eq } from "drizzle-orm"
+import { db } from "@/db/db"
+import { lessonsTable, InsertLesson, SelectLesson } from "@/db/schema/lessons-schema"
+import { ActionState } from "@/types"
 
-export async function createProfileAction(
-  data: InsertProfile
-): Promise<ActionState<SelectProfile>> {
+/**
+ * Creates a new lesson in the database.
+ * @param lesson - The lesson data to insert
+ * @returns Promise<ActionState<SelectLesson>> - The result of the create operation
+ */
+export async function createLessonAction(
+  lesson: InsertLesson
+): Promise<ActionState<SelectLesson>> {
   try {
-    const [newProfile] = await db.insert(profilesTable).values(data).returning()
-    return {
-      isSuccess: true,
-      message: "Profile created successfully",
-      data: newProfile
-    }
-  } catch (error) {
-    console.error("Error creating profile:", error)
-    return { isSuccess: false, message: "Failed to create profile" }
-  }
-}
+    const { userId } = await auth()
 
-export async function getProfileByUserIdAction(
-  userId: string
-): Promise<ActionState<SelectProfile>> {
-  try {
-    const profile = await db.query.profiles.findFirst({
-      where: eq(profilesTable.userId, userId)
-    })
-    if (!profile) {
-      return { isSuccess: false, message: "Profile not found" }
+    // Check if user is authenticated
+    if (!userId) {
+      return { isSuccess: false, message: "Unauthorized: You must be logged in to create a lesson" }
     }
 
-    return {
-      isSuccess: true,
-      message: "Profile retrieved successfully",
-      data: profile
+    // Validate input (basic check; more could be added based on requirements)
+    if (!lesson.title || !lesson.content || !lesson.level) {
+      return { isSuccess: false, message: "Missing required fields: title, content, or level" }
     }
-  } catch (error) {
-    console.error("Error getting profile by user id", error)
-    return { isSuccess: false, message: "Failed to get profile" }
-  }
-}
 
-export async function updateProfileAction(
-  userId: string,
-  data: Partial<InsertProfile>
-): Promise<ActionState<SelectProfile>> {
-  try {
-    const [updatedProfile] = await db
-      .update(profilesTable)
-      .set(data)
-      .where(eq(profilesTable.userId, userId))
-      .returning()
-
-    if (!updatedProfile) {
-      return { isSuccess: false, message: "Profile not found to update" }
-    }
+    // Insert the lesson into the database
+    const [newLesson] = await db.insert(lessonsTable).values(lesson).returning()
 
     return {
       isSuccess: true,
-      message: "Profile updated successfully",
-      data: updatedProfile
+      message: "Lesson created successfully",
+      data: newLesson
     }
   } catch (error) {
-    console.error("Error updating profile:", error)
-    return { isSuccess: false, message: "Failed to update profile" }
-  }
-}
-
-export async function updateProfileByStripeCustomerIdAction(
-  stripeCustomerId: string,
-  data: Partial<InsertProfile>
-): Promise<ActionState<SelectProfile>> {
-  try {
-    const [updatedProfile] = await db
-      .update(profilesTable)
-      .set(data)
-      .where(eq(profilesTable.stripeCustomerId, stripeCustomerId))
-      .returning()
-
-    if (!updatedProfile) {
-      return {
-        isSuccess: false,
-        message: "Profile not found by Stripe customer ID"
-      }
-    }
-
-    return {
-      isSuccess: true,
-      message: "Profile updated by Stripe customer ID successfully",
-      data: updatedProfile
-    }
-  } catch (error) {
-    console.error("Error updating profile by stripe customer ID:", error)
+    console.error("Error creating lesson:", error)
     return {
       isSuccess: false,
-      message: "Failed to update profile by Stripe customer ID"
+      message: "Failed to create lesson due to a server error"
     }
   }
 }
 
-export async function deleteProfileAction(
-  userId: string
-): Promise<ActionState<void>> {
+/**
+ * Retrieves lessons from the database based on optional level filter.
+ * @param level - Optional level to filter lessons (beginner, intermediate, advanced)
+ * @returns Promise<ActionState<SelectLesson[]>> - The result of the read operation
+ */
+export async function getLessonAction(
+  level?: "beginner" | "intermediate" | "advanced"
+): Promise<ActionState<SelectLesson[]>> {
   try {
-    await db.delete(profilesTable).where(eq(profilesTable.userId, userId))
+    const { userId } = await auth()
+
+    // Check if user is authenticated
+    if (!userId) {
+      return { isSuccess: false, message: "Unauthorized: You must be logged in to view lessons" }
+    }
+
+    // Fetch lessons, optionally filtering by level
+    const lessons = await db.query.lessonsTable.findMany({
+      where: level ? eq(lessonsTable.level, level) : undefined
+    })
+
     return {
       isSuccess: true,
-      message: "Profile deleted successfully",
+      message: "Lessons retrieved successfully",
+      data: lessons
+    }
+  } catch (error) {
+    console.error("Error getting lessons:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to retrieve lessons due to a server error"
+    }
+  }
+}
+
+/**
+ * Updates an existing lesson in the database.
+ * @param id - The ID of the lesson to update
+ * @param data - Partial lesson data to update
+ * @returns Promise<ActionState<SelectLesson>> - The result of the update operation
+ */
+export async function updateLessonAction(
+  id: string,
+  data: Partial<InsertLesson>
+): Promise<ActionState<SelectLesson>> {
+  try {
+    const { userId } = await auth()
+
+    // Check if user is authenticated
+    if (!userId) {
+      return { isSuccess: false, message: "Unauthorized: You must be logged in to update a lesson" }
+    }
+
+    // Validate input (ensure at least one field is provided)
+    if (Object.keys(data).length === 0) {
+      return { isSuccess: false, message: "No data provided to update" }
+    }
+
+    // Update the lesson in the database
+    const [updatedLesson] = await db
+      .update(lessonsTable)
+      .set(data)
+      .where(eq(lessonsTable.id, id))
+      .returning()
+
+    // Check if the lesson was found and updated
+    if (!updatedLesson) {
+      return { isSuccess: false, message: "Lesson not found" }
+    }
+
+    return {
+      isSuccess: true,
+      message: "Lesson updated successfully",
+      data: updatedLesson
+    }
+  } catch (error) {
+    console.error("Error updating lesson:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to update lesson due to a server error"
+    }
+  }
+}
+
+/**
+ * Deletes a lesson from the database.
+ * @param id - The ID of the lesson to delete
+ * @returns Promise<ActionState<void>> - The result of the delete operation
+ */
+export async function deleteLessonAction(id: string): Promise<ActionState<void>> {
+  try {
+    const { userId } = await auth()
+
+    // Check if user is authenticated
+    if (!userId) {
+      return { isSuccess: false, message: "Unauthorized: You must be logged in to delete a lesson" }
+    }
+
+    // Delete the lesson from the database
+    const deleted = await db.delete(lessonsTable).where(eq(lessonsTable.id, id)).returning()
+
+    // Check if the lesson was found and deleted
+    if (deleted.length === 0) {
+      return { isSuccess: false, message: "Lesson not found" }
+    }
+
+    return {
+      isSuccess: true,
+      message: "Lesson deleted successfully",
       data: undefined
     }
   } catch (error) {
-    console.error("Error deleting profile:", error)
-    return { isSuccess: false, message: "Failed to delete profile" }
+    console.error("Error deleting lesson:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to delete lesson due to a server error"
+    }
+  }
+}
+
+================
+File: actions/db/profiles-actions.ts
+================
+/**
+ * @description
+ * This file defines server actions for managing user progress in the Learn Kannada app.
+ * It provides functions to create, retrieve, and update progress records stored in the
+ * Supabase PostgreSQL database using Drizzle ORM. These actions support the progress
+ * tracking and gamification features by managing XP, streaks, and badges for users.
+ *
+ * Key features:
+ * - Create Progress: Initializes a new progress record for a user and lesson
+ * - Retrieve Progress: Fetches all progress records for a given user
+ * - Update Progress: Modifies an existing progress record (e.g., XP, streak, badges)
+ *
+ * @dependencies
+ * - @clerk/nextjs/server: Used for authentication via Clerk
+ * - drizzle-orm: Provides database query capabilities with Drizzle ORM
+ * - @/db/db: Imports the database instance with schema
+ * - @/db/schema/progress-schema: Imports progress table schema and types
+ * - @/types/server-action-types: Imports ActionState type for consistent return values
+ *
+ * @notes
+ * - All actions are server-side only ("use server") per Next.js conventions
+ * - Authentication is required; unauthenticated requests are rejected
+ * - Progress updates use partial updates to allow flexible modifications
+ * - Date handling follows backend rules by relying on schema defaults for timestamps
+ */
+
+"use server"
+
+import { auth } from "@clerk/nextjs/server"
+import { eq } from "drizzle-orm"
+import { db } from "@/db/db"
+import {
+  InsertProgress,
+  SelectProgress,
+  progressTable
+} from "@/db/schema/progress-schema"
+import { ActionState } from "@/types/server-action-types"
+
+/**
+ * Creates a new progress record for the authenticated user.
+ * @param progress - The progress data to insert (excluding id, createdAt, updatedAt)
+ * @returns Promise<ActionState<SelectProgress>> - Success with new progress or error
+ */
+export async function createProgressAction(
+  progress: Omit<InsertProgress, "id" | "createdAt" | "updatedAt">
+): Promise<ActionState<SelectProgress>> {
+  // Authenticate the user
+  const { userId } = await auth()
+  if (!userId) {
+    return {
+      isSuccess: false,
+      message: "Unauthorized: Please sign in to create progress"
+    }
+  }
+
+  try {
+    // Ensure userId matches the authenticated user
+    const progressData: InsertProgress = {
+      ...progress,
+      userId,
+      xp: progress.xp ?? 0, // Default to 0 if not provided
+      streak: progress.streak ?? 0, // Default to 0 if not provided
+      badges: progress.badges ?? [] // Default to empty array if not provided
+    }
+
+    // Insert the progress record into the database
+    const [newProgress] = await db
+      .insert(progressTable)
+      .values(progressData)
+      .returning()
+
+    return {
+      isSuccess: true,
+      message: "Progress created successfully",
+      data: newProgress
+    }
+  } catch (error) {
+    console.error("Error creating progress:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to create progress due to a server error"
+    }
+  }
+}
+
+/**
+ * Retrieves all progress records for the authenticated user.
+ * @param userIdParam - Optional user ID to fetch progress for (must match auth user)
+ * @returns Promise<ActionState<SelectProgress[]>> - Success with progress list or error
+ */
+export async function getProgressByUserIdAction(
+  userIdParam?: string
+): Promise<ActionState<SelectProgress[]>> {
+  // Authenticate the user
+  const { userId } = await auth()
+  if (!userId) {
+    return {
+      isSuccess: false,
+      message: "Unauthorized: Please sign in to view progress"
+    }
+  }
+
+  // If userIdParam is provided, ensure it matches the authenticated user
+  if (userIdParam && userIdParam !== userId) {
+    return {
+      isSuccess: false,
+      message: "Forbidden: You can only view your own progress"
+    }
+  }
+
+  try {
+    // Fetch all progress records for the authenticated user
+    const progressRecords = await db
+      .select()
+      .from(progressTable)
+      .where(eq(progressTable.userId, userId))
+
+    return {
+      isSuccess: true,
+      message: "Progress retrieved successfully",
+      data: progressRecords
+    }
+  } catch (error) {
+    console.error("Error retrieving progress:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to retrieve progress due to a server error"
+    }
+  }
+}
+
+/**
+ * Updates an existing progress record for the authenticated user.
+ * @param id - The ID of the progress record to update
+ * @param data - Partial progress data to update (e.g., xp, streak, badges)
+ * @returns Promise<ActionState<SelectProgress>> - Success with updated progress or error
+ */
+export async function updateProgressAction(
+  id: string,
+  data: Partial<Omit<InsertProgress, "id" | "userId" | "createdAt" | "updatedAt">>
+): Promise<ActionState<SelectProgress>> {
+  // Authenticate the user
+  const { userId } = await auth()
+  if (!userId) {
+    return {
+      isSuccess: false,
+      message: "Unauthorized: Please sign in to update progress"
+    }
+  }
+
+  try {
+    // Verify the progress record belongs to the authenticated user
+    const existingProgress = await db
+      .select()
+      .from(progressTable)
+      .where(eq(progressTable.id, id))
+      .limit(1)
+
+    if (existingProgress.length === 0) {
+      return {
+        isSuccess: false,
+        message: "Progress record not found"
+      }
+    }
+
+    if (existingProgress[0].userId !== userId) {
+      return {
+        isSuccess: false,
+        message: "Forbidden: You can only update your own progress"
+      }
+    }
+
+    // Update the progress record with provided data
+    const [updatedProgress] = await db
+      .update(progressTable)
+      .set(data)
+      .where(eq(progressTable.id, id))
+      .returning()
+
+    return {
+      isSuccess: true,
+      message: "Progress updated successfully",
+      data: updatedProgress
+    }
+  } catch (error) {
+    console.error("Error updating progress:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to update progress due to a server error"
+    }
   }
 }
 
@@ -3430,10 +3690,8 @@ import postgres from "postgres"
 import { profilesTable } from "@/db/schema/profiles-schema"
 import { lessonsTable } from "@/db/schema/lessons-schema"
 import { progressTable } from "@/db/schema/progress-schema"
-import { exercisesTable } from "@/db/schema/exercises-schema" // Updated to real import from type-only
-
-// Import schemas to be defined later (type-only imports to avoid runtime errors until defined)
-import type { chatMessagesTable } from "@/db/schema"
+import { exercisesTable } from "@/db/schema/exercises-schema" // Added to align with Step 6 completion
+import { chatMessagesTable } from "@/db/schema/chat-messages-schema" // Updated to real import from type-only
 
 // Load environment variables from .env.local
 config({ path: ".env.local" })
@@ -3444,7 +3702,7 @@ const schema = {
   lessons: lessonsTable,
   progress: progressTable,
   exercises: exercisesTable, // Added exercises schema
-  chatMessages: chatMessagesTable // Placeholder for chat messages schema (Step 7)
+  chatMessages: chatMessagesTable // Added chat messages schema
 }
 
 // Initialize PostgreSQL client with the connection string
@@ -3569,67 +3827,6 @@ File: db/migrations/meta/0000_snapshot.json
 }
 
 ================
-File: db/progress-schema.ts
-================
-/*
- * Defines the database schema for user progress in the Learn Kannada app.
- * This file creates the progress table to track user learning progress, including
- * XP points, streaks, and badges, with relationships to profiles and lessons.
- *
- * Key features:
- * - Links to profiles and lessons via foreign keys (userId and lessonId)
- * - Stores XP and streak as integers for gamification
- * - Uses JSON for badges to support flexible badge structures
- * - Includes timestamps for creation and updates
- *
- * @dependencies
- * - drizzle-orm/pg-core: Provides PostgreSQL schema definition utilities
- * - @/db/schema: Imports profilesTable and lessonsTable for foreign key references
- *
- * @notes
- * - No migrations are generated here; handled externally per backend rules
- * - lessonId is optional (nullable) to allow progress tracking without a specific lesson
- * - badges defaults to an empty array for new records
- */
-
-import { integer, json, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
-import { profilesTable } from "@/db/schema/profiles-schema"
-import { lessonsTable } from "@/db/schema/lessons-schema"
-
-/**
- * Defines the progress table schema.
- * This table stores user progress data linked to their profile and optionally a lesson.
- */
-export const progressTable = pgTable("progress", {
-  id: uuid("id").defaultRandom().primaryKey(), // Unique identifier for each progress record
-  userId: text("user_id")
-    .notNull()
-    .references(() => profilesTable.userId, { onDelete: "cascade" }), // Foreign key to profiles, cascades on delete
-  lessonId: uuid("lesson_id")
-    .references(() => lessonsTable.id, { onDelete: "cascade" }), // Optional foreign key to lessons, cascades on delete
-  xp: integer("xp").default(0).notNull(), // Experience points earned, defaults to 0
-  streak: integer("streak").default(0).notNull(), // Current streak count, defaults to 0
-  badges: json("badges").default([]).notNull(), // Array of badges earned, stored as JSON, defaults to empty array
-  createdAt: timestamp("created_at").defaultNow().notNull(), // Creation timestamp
-  updatedAt: timestamp("updated_at")
-    .defaultNow()
-    .notNull()
-    .$onUpdate(() => new Date()) // Update timestamp on modification
-})
-
-/**
- * Type definition for inserting a new progress record.
- * Matches the schema structure for type-safe insertions.
- */
-export type InsertProgress = typeof progressTable.$inferInsert
-
-/**
- * Type definition for selecting a progress record.
- * Matches the schema structure for type-safe queries.
- */
-export type SelectProgress = typeof progressTable.$inferSelect
-
-================
 File: db/schema/chat-messages-schema.ts
 ================
 /*
@@ -3704,7 +3901,14 @@ File: db/schema/exercises-schema.ts
  * - lessonId is required (notNull) to ensure exercises are always tied to a lesson
  */
 
-import { json, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import {
+  json,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uuid
+} from "drizzle-orm/pg-core"
 import { lessonsTable } from "@/db/schema/lessons-schema"
 
 /**
@@ -3784,10 +3988,21 @@ File: db/schema/lessons-schema.ts
  * - Content is JSON to allow flexible lesson structure
  */
 
-import { json, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import {
+  json,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uuid
+} from "drizzle-orm/pg-core"
 
 // Define the lesson level enum
-export const levelEnum = pgEnum("level", ["beginner", "intermediate", "advanced"])
+export const levelEnum = pgEnum("level", [
+  "beginner",
+  "intermediate",
+  "advanced"
+])
 
 // Define the lessons table
 export const lessonsTable = pgTable("lessons", {
@@ -3831,6 +4046,75 @@ export const profilesTable = pgTable("profiles", {
 
 export type InsertProfile = typeof profilesTable.$inferInsert
 export type SelectProfile = typeof profilesTable.$inferSelect
+
+================
+File: db/schema/progress-schema.ts
+================
+/*
+ * Defines the database schema for user progress in the Learn Kannada app.
+ * This file creates the progress table to track user learning progress, including
+ * XP points, streaks, and badges, with relationships to profiles and lessons.
+ *
+ * Key features:
+ * - Links to profiles and lessons via foreign keys (userId and lessonId)
+ * - Stores XP and streak as integers for gamification
+ * - Uses JSON for badges to support flexible badge structures
+ * - Includes timestamps for creation and updates
+ *
+ * @dependencies
+ * - drizzle-orm/pg-core: Provides PostgreSQL schema definition utilities
+ * - @/db/schema: Imports profilesTable and lessonsTable for foreign key references
+ *
+ * @notes
+ * - No migrations are generated here; handled externally per backend rules
+ * - lessonId is optional (nullable) to allow progress tracking without a specific lesson
+ * - badges defaults to an empty array for new records
+ */
+
+import {
+  integer,
+  json,
+  pgTable,
+  text,
+  timestamp,
+  uuid
+} from "drizzle-orm/pg-core"
+import { profilesTable } from "@/db/schema/profiles-schema"
+import { lessonsTable } from "@/db/schema/lessons-schema"
+
+/**
+ * Defines the progress table schema.
+ * This table stores user progress data linked to their profile and optionally a lesson.
+ */
+export const progressTable = pgTable("progress", {
+  id: uuid("id").defaultRandom().primaryKey(), // Unique identifier for each progress record
+  userId: text("user_id")
+    .notNull()
+    .references(() => profilesTable.userId, { onDelete: "cascade" }), // Foreign key to profiles, cascades on delete
+  lessonId: uuid("lesson_id").references(() => lessonsTable.id, {
+    onDelete: "cascade"
+  }), // Optional foreign key to lessons, cascades on delete
+  xp: integer("xp").default(0).notNull(), // Experience points earned, defaults to 0
+  streak: integer("streak").default(0).notNull(), // Current streak count, defaults to 0
+  badges: json("badges").default([]).notNull(), // Array of badges earned, stored as JSON, defaults to empty array
+  createdAt: timestamp("created_at").defaultNow().notNull(), // Creation timestamp
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()) // Update timestamp on modification
+})
+
+/**
+ * Type definition for inserting a new progress record.
+ * Matches the schema structure for type-safe insertions.
+ */
+export type InsertProgress = typeof progressTable.$inferInsert
+
+/**
+ * Type definition for selecting a progress record.
+ * Matches the schema structure for type-safe queries.
+ */
+export type SelectProgress = typeof progressTable.$inferSelect
 
 ================
 File: drizzle.config.ts
