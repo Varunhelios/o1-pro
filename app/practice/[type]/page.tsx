@@ -7,7 +7,6 @@ import {
 import QuizExercise from "@/components/practice/quiz-exercise"
 import SpeakingExercise from "@/components/practice/speaking-exercise"
 import WritingExercise from "@/components/practice/writing-exercise"
-import { SelectExercise } from "@/db/schema/exercises-schema"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
 
@@ -33,7 +32,7 @@ async function PracticeExerciseFetcher({
   // Validate exercise type
   const validTypes = ["quiz", "writing", "speaking"]
   if (!validTypes.includes(type)) {
-    redirect("/learn")
+    return redirect("/learn") // ✅ Fixed
   }
 
   // Fetch exercises for the lesson
@@ -41,14 +40,14 @@ async function PracticeExerciseFetcher({
     await getExercisesByLessonIdAction(lessonId)
   if (!isSuccess || !data || data.length === 0) {
     console.error(`Failed to fetch exercises: ${message}`)
-    redirect("/learn")
+    return redirect("/learn") // ✅ Fixed
   }
 
   // Find the first exercise matching the type
   const exercise = data.find(ex => ex.type === type)
   if (!exercise) {
     console.error(`No ${type} exercise found for lesson ${lessonId}`)
-    redirect("/learn")
+    return redirect("/learn") // ✅ Fixed
   }
 
   // Define submission handler
@@ -69,7 +68,7 @@ async function PracticeExerciseFetcher({
     case "speaking":
       return <SpeakingExercise exercise={exercise} onSubmit={handleSubmit} />
     default:
-      redirect("/learn")
+      return redirect("/learn")
   }
 }
 
@@ -78,7 +77,7 @@ async function PracticeExerciseFetcher({
  * @param {{ params: { type: string }, searchParams: { lessonId?: string } }} props - Route and query params
  * @returns {JSX.Element} The exercise UI with Suspense boundary
  */
-export default function PracticePage({
+export default async function PracticePage({
   params,
   searchParams
 }: {
@@ -91,7 +90,7 @@ export default function PracticePage({
   // Validate lessonId presence
   if (!lessonId) {
     console.error("No lessonId provided in query parameters")
-    redirect("/learn")
+    return redirect("/learn") // ✅ Fixed
   }
 
   return (
