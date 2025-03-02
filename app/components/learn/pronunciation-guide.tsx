@@ -1,28 +1,29 @@
 /**
  * @description
  * This client-side component provides a pronunciation guide for the Learn Kannada app.
- * It uses the Web Speech API to record and transcribe user pronunciation of Kannada phrases,
- * supporting the interactive pronunciation guides feature. Designed for use in lesson pages
- * (e.g., /learn/[level]/page.tsx) to enhance learning modules.
+ * It allows users to practice speaking Kannada phrases by recording their speech using
+ * the Web Speech API and displaying the transcribed result. Designed for use in lesson
+ * pages to support interactive pronunciation learning.
  *
  * Key features:
- * - Speech Recording: Toggles recording of user speech with start/stop functionality
- * - Transcription Display: Shows the transcribed text in a readonly textarea
- * - Browser Compatibility: Handles lack of Web Speech API support gracefully
- * - Responsive UI: Built with Tailwind CSS and Shadcn components for a clean, mobile-friendly design
+ * - Phrase Display: Shows the Kannada phrase to practice
+ * - Speech Recording: Uses Web Speech API to record and transcribe user speech
+ * - Responsive UI: Clean, minimalistic design with Tailwind CSS and Shadcn components
+ * - Error Handling: Handles unsupported browsers and recognition errors gracefully
  *
  * @dependencies
- * - @/components/ui/button: Shadcn Button for recording and submission controls
+ * - @/components/ui/button: Shadcn Button for record/stop controls
  * - @/components/ui/textarea: Shadcn Textarea for displaying transcription
- * - lucide-react: Provides Mic and Send icons for UI enhancement
- * - react: Manages state and effects for recording and transcription
+ * - lucide-react: Provides Mic and Send icons for UI
+ * - react: Manages component state and effects
+ * - @/types: Imports SpeechRecognition and SpeechRecognitionConstructor for type safety
  *
  * @notes
- * - Uses 'kn-IN' language code for Kannada; assumes browser support for this locale
- * - Submits transcript via onSubmit prop for assessment in Step 23
- * - Handles edge cases: unsupported browsers, recognition errors, empty transcripts
- * - No direct assessment here; focuses on recording and transcription
- * - Adheres to client component rules: no server actions called directly
+ * - Requires browser support for Web Speech API (SpeechRecognition); falls back gracefully if unsupported
+ * - Language is set to "kn-IN" (Kannada) for accurate recognition
+ * - Submission handler is passed as a prop to allow integration with server actions (e.g., assessPronunciationAction)
+ * - Handles edge cases like empty transcripts or API errors with user feedback
+ * - Uses native DOM SpeechRecognitionEvent with custom SpeechRecognition type for compatibility
  */
 
 "use client"
@@ -30,92 +31,64 @@
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Mic, Send } from "lucide-react"
-import { useState, useEffect } from "react"
+import { useState } from "react"
+import {
+  SpeechRecognition,
+  SpeechRecognitionEvent,
+  SpeechRecognitionErrorEvent,
+  SpeechRecognitionConstructor
+} from "@/types/web-speech-types"
 
-// Add these type declarations at the top of the file
-interface SpeechRecognition {
-  new (): SpeechRecognition
-  start(): void
-  stop(): void
-  onresult: (event: SpeechRecognitionEvent) => void
-  onerror: (event: SpeechRecognitionErrorEvent) => void
-  onend: () => void
-  continuous: boolean
-  interimResults: boolean
-  lang: string
-}
-
-interface SpeechRecognitionEvent {
-  results: SpeechRecognitionResultList
-}
-
-interface SpeechRecognitionErrorEvent {
-  error: string
-}
-
-// Define props interface for the component
+// Define props interface for type safety
 interface PronunciationGuideProps {
-  phrase: string // The Kannada phrase to pronounce
-  onSubmit: (transcript: string) => Promise<void> // Callback to handle the transcribed speech
+  phrase: string // The Kannada phrase to practice
+  onSubmit: (transcript: string) => Promise<void> // Handler to process the recorded speech
 }
 
 /**
- * PronunciationGuide component enables users to practice Kannada pronunciation.
- * @param {PronunciationGuideProps} props - Phrase to pronounce and submission handler
- * @returns {JSX.Element} UI for recording and submitting speech
+ * PronunciationGuide component renders a UI for practicing pronunciation.
+ * @param {PronunciationGuideProps} props - Phrase to practice and submission handler
+ * @returns {JSX.Element} A UI with recording controls and transcript display
  */
 export default function PronunciationGuide({
   phrase,
   onSubmit
 }: PronunciationGuideProps) {
-  const [isRecording, setIsRecording] = useState(false) // Tracks recording state
-  const [transcript, setTranscript] = useState("") // Stores transcribed speech
-  const [isSupported, setIsSupported] = useState(true) // Tracks Web Speech API support
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null) // SpeechRecognition instance
+  const [isRecording, setIsRecording] = useState(false)
+  const [transcript, setTranscript] = useState("")
+  const [isSupported, setIsSupported] = useState(true)
 
-  // Initialize SpeechRecognition on component mount
-  useEffect(() => {
-    // Check for SpeechRecognition support (standard or webkit prefix)
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition
+  // Initialize SpeechRecognition with type safety
+  const SpeechRecognitionType: SpeechRecognitionConstructor | undefined =
+    window.SpeechRecognition || window.webkitSpeechRecognition
+  const recognition: SpeechRecognition | null = SpeechRecognitionType
+    ? new SpeechRecognitionType()
+    : null
 
-    if (!SpeechRecognition) {
-      setIsSupported(false)
-      return
-    }
-
-    // Instantiate and configure SpeechRecognition
-    const recog = new SpeechRecognition()
-    recog.continuous = false // Single result, not continuous
-    recog.interimResults = false // Final results only
-    recog.lang = "kn-IN" // Kannada language code
+  // Configure recognition if available
+  if (recognition) {
+    recognition.continuous = false
+    recognition.interimResults = false
+    recognition.lang = "kn-IN" // Kannada language code
 
     // Handle transcription result
-    recog.onresult = (event: SpeechRecognitionEvent) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       const result = event.results[0][0].transcript
       setTranscript(result)
       setIsRecording(false)
     }
 
     // Handle recognition errors
-    recog.onerror = (event: SpeechRecognitionErrorEvent) => {
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error("Speech recognition error:", event.error)
       setTranscript(`Error: ${event.error}. Please try again.`)
       setIsRecording(false)
     }
+  } else {
+    setIsSupported(false)
+  }
 
-    // Ensure recording stops cleanly
-    recog.onend = () => setIsRecording(false)
-
-    setRecognition(recog)
-
-    // Cleanup on unmount
-    return () => {
-      if (recog) recog.stop()
-    }
-  }, []) // Empty dependency array: runs once on mount
-
-  // Toggle recording state
+  // Handle recording toggle
   const toggleRecording = () => {
     if (!recognition) return
 
@@ -128,26 +101,27 @@ export default function PronunciationGuide({
     }
   }
 
-  // Submit the transcript
+  // Handle submission of the transcript
   const handleSubmit = async () => {
-    if (!transcript.trim() || isRecording) return // Prevent submission if empty or recording
-    await onSubmit(transcript)
-    setTranscript("") // Reset after submission
+    if (transcript.trim()) {
+      await onSubmit(transcript)
+      setTranscript("") // Reset after successful submission
+    }
   }
 
   return (
-    <div className="bg-background w-full max-w-md space-y-4 rounded-lg border p-4">
-      {/* Phrase to pronounce */}
+    <div className="w-full max-w-lg space-y-6 p-4">
+      {/* Display the phrase to practice */}
       <div className="text-foreground text-lg font-medium">{phrase}</div>
 
-      {/* Recording UI */}
+      {/* Recording controls and transcript display */}
       {isSupported ? (
         <>
           <Button
             onClick={toggleRecording}
             disabled={!recognition}
-            variant={isRecording ? "destructive" : "default"}
             className="w-full"
+            variant={isRecording ? "destructive" : "default"}
           >
             <Mic className="mr-2 size-4" />
             {isRecording ? "Stop Recording" : "Start Recording"}
@@ -156,8 +130,8 @@ export default function PronunciationGuide({
           <Textarea
             value={transcript}
             onChange={e => setTranscript(e.target.value)} // Allow manual edits
-            placeholder="Your pronunciation will appear here..."
-            className="h-24 resize-none"
+            placeholder="Your speech will appear here..."
+            className="h-32 resize-none"
             readOnly={isRecording} // Prevent edits during recording
           />
 
@@ -167,13 +141,13 @@ export default function PronunciationGuide({
             className="w-full"
           >
             <Send className="mr-2 size-4" />
-            Submit Pronunciation
+            Submit Speech
           </Button>
         </>
       ) : (
         <div className="text-muted-foreground text-center">
           Speech recognition is not supported in your browser. Please use a
-          modern browser like Chrome or Edge.
+          modern browser like Chrome or Firefox.
         </div>
       )}
     </div>

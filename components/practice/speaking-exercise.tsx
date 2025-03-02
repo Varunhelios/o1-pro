@@ -34,7 +34,8 @@ import { useState } from "react"
 import {
   SpeechRecognition,
   SpeechRecognitionEvent,
-  SpeechRecognitionResultList
+  SpeechRecognitionResultList,
+  SpeechRecognitionErrorEvent
 } from "@/types/web-speech-types"
 
 // Extend the Window interface to include SpeechRecognition
@@ -52,11 +53,6 @@ interface SpeakingExerciseProps {
     id: string
     content: { phrase: string } // Expected phrase from exercise content
   } // Exercise data from database
-}
-
-// Define types for SpeechRecognitionEvent and SpeechRecognitionErrorEvent
-interface SpeechRecognitionErrorEvent {
-  error: string
 }
 
 /**
