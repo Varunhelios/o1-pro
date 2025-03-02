@@ -1,158 +1,129 @@
 /**
  * @description
- * This server component serves as the dashboard page for the Learn Kannada app.
- * It fetches user progress data and renders static progress metrics (streak, badges),
- * delegating the XP chart to a client component for gamification visualization.
+ * This server-side page renders the user dashboard for the Learn Kannada app.
+ * It displays progress metrics including XP, streaks, and badges, supporting
+ * the progress tracking and gamification feature to keep users motivated.
  *
  * Key features:
- * - Fetches progress data server-side using getProgressByUserIdAction
- * - Displays current streak and badges in a responsive layout
- * - Passes XP data to ProgressChart client component for chart rendering
- * - Uses Clerk for authentication to secure access
- * - Implements Suspense for async data fetching with a loading fallback
- * - Clean, minimalistic UI with Tailwind CSS per design requests
+ * - Fetches progress data server-side using a server action
+ * - Displays XP with a progress bar, streak count, and badge list
+ * - Responsive UI: Uses Tailwind CSS and Shadcn components for a clean design
+ * - Loading State: Implements Suspense for asynchronous data fetching
  *
  * @dependencies
- * - @clerk/nextjs/server: For authentication (auth helper)
- * - @/actions/db/progress-actions: Server action to fetch progress data
- * - @/components/dashboard/progress-chart: Client component for XP chart
- * - lucide-react: Provides icons (e.g., Trophy)
- * - react: For Suspense and ReactNode types
+ * - @/actions/db/progress-actions: Provides getProgressByUserIdAction
+ * - @/components/ui/progress: Shadcn Progress bar for XP visualization
+ * - @/db/schema/progress-schema: Imports SelectProgress for type safety
+ * - @clerk/nextjs/server: Provides auth for user authentication
+ * - lucide-react: Provides icons (Trophy, Flame)
+ * - react: Provides Suspense for async rendering
  *
  * @notes
- * - Aggregates total XP and uses latest streak based on createdAt
- * - Badges are flattened from all entries; assumes they're strings in JSON
- * - Chart data preparation moved to client component to avoid server-side recharts issues
- * - Handles edge cases: no user, no progress, fetch errors
+ * - Marked "use server" per server component rules
+ * - Requires Clerk authentication; redirects unauthenticated users
+ * - Assumes progress records exist; displays fallback if none found
+ * - XP progress bar caps at 300 (Master badge threshold)
  */
 
 "use server"
 
 import { auth } from "@clerk/nextjs/server"
+import { Suspense } from "react"
 import { getProgressByUserIdAction } from "@/actions/db/progress-actions"
 import { SelectProgress } from "@/db/schema/progress-schema"
-import { Suspense } from "react"
-import ProgressChart from "@/components/dashboard/progress-chart"
-import { Trophy } from "lucide-react"
+import { Progress } from "@/components/ui/progress"
+import { Trophy, Flame } from "lucide-react"
+
+// Define props interface (though not directly used here due to server component)
+interface DashboardPageProps {}
 
 /**
  * DashboardPage component renders the user dashboard.
- * @returns {JSX.Element} The dashboard UI with progress data
+ * @returns {JSX.Element} The dashboard UI with progress metrics
  */
-export default async function DashboardPage() {
-  // Authenticate user with Clerk
-  const { userId } = await auth()
+export default async function DashboardPage({}: DashboardPageProps) {
+  const authResult = await auth()
+  const { userId } = authResult
+
   if (!userId) {
-    return <div>Please sign in to view your dashboard.</div>
+    throw new Error("User not authenticated")
   }
 
   return (
-    <Suspense fallback={<LoadingFallback />}>
-      <DashboardContent userId={userId} />
+    <Suspense fallback={<div>Loading dashboard...</div>}>
+      <DashboardContentFetcher userId={userId} />
     </Suspense>
   )
 }
 
 /**
- * DashboardContent fetches and displays progress data.
- * @param {Object} props - Contains userId
- * @param {string} props.userId - The authenticated user's ID
+ * DashboardContentFetcher fetches progress data and renders the dashboard content.
+ * @param {{ userId: string }} props - The authenticated user's ID
  * @returns {JSX.Element} The rendered dashboard content
  */
-async function DashboardContent({ userId }: { userId: string }) {
-  // Fetch user progress
-  const { isSuccess, message, data } = await getProgressByUserIdAction(userId)
+async function DashboardContentFetcher({ userId }: { userId: string }) {
+  const { isSuccess, data, message } = await getProgressByUserIdAction(userId)
 
-  // Handle fetch failure or no progress data
   if (!isSuccess || !data || data.length === 0) {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
-        <div className="text-muted-foreground text-center">
-          {message || "No progress yet. Start learning to see your stats!"}
-        </div>
+      <div className="text-muted-foreground p-4 text-center">
+        {message ||
+          "No progress data available yet. Start learning to track your progress!"}
       </div>
     )
   }
 
-  // Process progress data
-  const progress: SelectProgress[] = data
-  const totalXP = progress.reduce((sum, entry) => sum + entry.xp, 0)
-  // Sort by createdAt descending to get the latest streak
-  const latestStreak = progress.sort(
-    (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-  )[0].streak
-  // Flatten badges from all entries
-  const badges = progress.flatMap(entry => entry.badges as string[])
-  // Prepare chart data as props
-  const chartData = progress.map(entry => ({
-    date: entry.createdAt.toLocaleDateString(),
-    xp: entry.xp
-  }))
+  // Use the latest progress record (assuming one per user for simplicity)
+  const progress: SelectProgress = data[0]
+  const xp = progress.xp || 0
+  const streak = progress.streak || 0
+  const badges = (progress.badges as string[]) || []
+
+  // XP progress bar capped at 300 (Master badge threshold)
+  const xpProgress = Math.min((xp / 300) * 100, 100)
 
   return (
-    <div className="container mx-auto min-h-[calc(100vh-4rem)] p-6">
-      <h1 className="text-foreground mb-6 text-3xl font-bold">
-        Your Learning Dashboard
-      </h1>
+    <div className="container mx-auto p-4">
+      {/* Header */}
+      <h1 className="mb-6 text-2xl font-bold">Your Learning Dashboard</h1>
 
-      {/* XP Section with Chart */}
-      <div className="bg-card mb-8 rounded-lg p-6 shadow-sm">
-        <h2 className="text-foreground mb-4 text-xl font-semibold">
-          Experience Points (XP)
+      {/* XP Section */}
+      <div className="mb-8">
+        <h2 className="mb-2 text-lg font-semibold">
+          Experience Points (XP): {xp}
         </h2>
-        <div className="text-muted-foreground mb-4 text-lg">
-          Total XP: {totalXP}
-        </div>
-        <ProgressChart chartData={chartData} />
+        <Progress value={xpProgress} className="w-full" />
       </div>
 
       {/* Streak Section */}
-      <div className="bg-card mb-8 rounded-lg p-6 shadow-sm">
-        <h2 className="text-foreground mb-4 text-xl font-semibold">
-          Current Streak
-        </h2>
-        <div className="flex items-center">
-          <Trophy className="mr-2 size-6 text-yellow-500" />
-          <span className="text-muted-foreground text-lg">
-            {latestStreak} days
-          </span>
-        </div>
+      <div className="mb-8 flex items-center gap-2">
+        <Flame className="size-6 text-orange-500" />
+        <span className="text-lg font-semibold">
+          Streak: {streak} day{streak !== 1 ? "s" : ""}
+        </span>
       </div>
 
       {/* Badges Section */}
-      <div className="bg-card rounded-lg p-6 shadow-sm">
-        <h2 className="text-foreground mb-4 text-xl font-semibold">
-          Badges Earned
-        </h2>
+      <div>
+        <h2 className="mb-2 text-lg font-semibold">Badges</h2>
         {badges.length > 0 ? (
-          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
+          <div className="flex flex-wrap gap-4">
             {badges.map((badge, index) => (
-              <li
+              <div
                 key={index}
-                className="text-muted-foreground bg-muted rounded p-2 text-center"
+                className="bg-muted text-foreground flex items-center gap-2 rounded-md p-2"
               >
-                {badge}
-              </li>
+                <Trophy className="size-5 text-yellow-500" />
+                <span>{badge}</span>
+              </div>
             ))}
-          </ul>
-        ) : (
-          <div className="text-muted-foreground">
-            No badges earned yet. Keep practicing!
           </div>
+        ) : (
+          <p className="text-muted-foreground">
+            No badges earned yet. Keep learning!
+          </p>
         )}
       </div>
-    </div>
-  )
-}
-
-/**
- * LoadingFallback component shows a loading state during data fetching.
- * @returns {JSX.Element} A centered loading message
- */
-function LoadingFallback() {
-  return (
-    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
-      <div className="text-muted-foreground">Loading your dashboard...</div>
     </div>
   )
 }
