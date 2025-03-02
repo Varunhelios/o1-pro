@@ -1,11 +1,12 @@
 /**
  * @description
  * This file defines server actions for Stripe payment operations in the Learn Kannada app.
- * It handles creating checkout sessions for tutor bookings and managing subscription status changes.
- * All actions are server-side, adhering to the project's backend and payments rules.
+ * It handles creating checkout sessions for tutor bookings, updating customer details after one-time payments,
+ * and managing subscription status changes. All actions are server-side, adhering to the project's backend and payments rules.
  *
  * Key features:
  * - Tutor Checkout: Creates a Stripe checkout session for booking live tutor sessions
+ * - Customer Update: Updates user profile with Stripe customer ID after a one-time payment
  * - Subscription Management: Updates user profile based on Stripe webhook events
  * - Type Safety: Uses TypeScript interfaces for inputs and outputs
  *
@@ -85,6 +86,41 @@ export async function createTutorCheckoutSessionAction({
     return {
       isSuccess: false,
       message: "Failed to create checkout session. Please try again."
+    }
+  }
+}
+
+/**
+ * Updates user profile with Stripe customer ID after a one-time payment (e.g., tutor session).
+ * @param {string} userId - Clerk user ID
+ * @param {string} customerId - Stripe customer ID
+ * @returns {Promise<ActionState<void>>} Success/failure with no data
+ */
+export async function updateStripeCustomerAction(
+  userId: string,
+  customerId: string
+): Promise<ActionState<void>> {
+  try {
+    const profileUpdates: Partial<InsertProfile> = {
+      stripeCustomerId: customerId
+      // No subscription ID or membership change for one-time payments
+    }
+
+    await db
+      .update(profilesTable)
+      .set(profileUpdates)
+      .where(eq(profilesTable.userId, userId))
+
+    return {
+      isSuccess: true,
+      message: "Customer details updated successfully",
+      data: undefined
+    }
+  } catch (error) {
+    console.error("Error updating customer details:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to update customer details"
     }
   }
 }
