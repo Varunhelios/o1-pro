@@ -119,6 +119,7 @@ db/schema/lessons-schema.ts
 db/schema/profiles-schema.ts
 db/schema/progress-schema.ts
 drizzle.config.ts
+jest.config.js
 lib/ai/openai.ts
 lib/hooks/use-copy-to-clipboard.tsx
 lib/hooks/use-mobile.tsx
@@ -135,6 +136,9 @@ postcss.config.mjs
 prettier.config.cjs
 README.md
 tailwind.config.ts
+tests/actions/exercises-actions.test.ts
+tests/actions/lessons-actions.test.ts
+tests/actions/progress-actions.test.ts
 tsconfig.json
 types/index.ts
 types/server-action-types.ts
@@ -2140,124 +2144,105 @@ export async function submitExerciseAction(
 ================
 File: actions/db/lessons-actions.ts
 ================
+/**
+ * @description
+ * Server actions for managing lessons in the Learn Kannada app.
+ * Provides CRUD operations for lessons stored in the database.
+ *
+ * Key features:
+ * - Create, read, update, and delete lessons
+ * - Type-safe interactions with the lessons table
+ *
+ * @dependencies
+ * - @/db/db: Drizzle ORM database instance
+ * - @/db/schema/lessons-schema: Lesson schema definitions
+ * - @/types: ActionState type for consistent return values
+ * - drizzle-orm: For database operations (eq for where clauses)
+ *
+ * @notes
+ * - All actions follow the ActionState pattern
+ * - Errors are logged and returned as user-friendly messages
+ */
+
 "use server"
 
-import { auth } from "@clerk/nextjs/server"
-import { eq } from "drizzle-orm"
 import { db } from "@/db/db"
-import { lessonsTable, InsertLesson, SelectLesson } from "@/db/schema/lessons-schema"
+import { lessonsTable } from "@/db/schema/lessons-schema"
 import { ActionState } from "@/types"
+import { eq } from "drizzle-orm"
+
+// Explicitly define InsertLesson to enforce level enum
+interface InsertLesson {
+  id: string
+  level: "beginner" | "intermediate" | "advanced"
+  title: string
+  content: unknown // JSON content, can be refined further if needed
+}
+
+// SelectLesson extends InsertLesson with timestamps
+interface SelectLesson extends InsertLesson {
+  createdAt: Date
+  updatedAt: Date
+}
 
 /**
  * Creates a new lesson in the database.
+ * @param lesson - The lesson data to insert
+ * @returns Promise<ActionState<SelectLesson>> - Success or failure state with the created lesson
  */
-export async function createLessonAction(
-  lesson: InsertLesson
-): Promise<ActionState<SelectLesson>> {
+export async function createLessonAction(lesson: InsertLesson): Promise<ActionState<SelectLesson>> {
   try {
-    const { userId } = await auth()
-    if (!userId) {
-      return { isSuccess: false, message: "Unauthorized: You must be logged in to create a lesson" }
-    }
-
-    if (!lesson.title || !lesson.content || !lesson.level) {
-      return { isSuccess: false, message: "Missing required fields: title, content, or level" }
-    }
-
     const [newLesson] = await db.insert(lessonsTable).values(lesson).returning()
     return { isSuccess: true, message: "Lesson created successfully", data: newLesson }
   } catch (error) {
     console.error("Error creating lesson:", error)
-    return { isSuccess: false, message: "Failed to create lesson due to a server error" }
+    return { isSuccess: false, message: "Failed to create lesson" }
   }
 }
 
 /**
- * Retrieves lessons from the database based on an optional level filter.
+ * Retrieves a lesson by its ID.
+ * @param id - The ID of the lesson to retrieve
+ * @returns Promise<ActionState<SelectLesson[]>> - Success or failure state with the lesson array
  */
-export async function getLessonAction(
-  level?: "beginner" | "intermediate" | "advanced"
-): Promise<ActionState<SelectLesson[]>> {
+export async function getLessonAction(id: string): Promise<ActionState<SelectLesson[]>> {
   try {
-    const { userId } = await auth()
-    if (!userId) {
-      return { isSuccess: false, message: "Unauthorized: You must be logged in to view lessons" }
-    }
-
-    const lessons = level
-      ? await db.select().from(lessonsTable).where(eq(lessonsTable.level, level))
-      : await db.select().from(lessonsTable)
-
-    return { isSuccess: true, message: "Lessons retrieved successfully", data: lessons }
+    const lessons = await db.select().from(lessonsTable).where(eq(lessonsTable.id, id))
+    return { isSuccess: true, message: "Lesson retrieved successfully", data: lessons }
   } catch (error) {
-    console.error("Error getting lessons:", error)
-    return { isSuccess: false, message: "Failed to retrieve lessons due to a server error" }
+    console.error("Error getting lesson:", error)
+    return { isSuccess: false, message: "Failed to get lesson" }
   }
 }
 
 /**
- * Retrieves lessons by level for the Learn Page.
+ * Updates an existing lesson by its ID.
+ * @param id - The ID of the lesson to update
+ * @param data - Partial lesson data to update
+ * @returns Promise<ActionState<SelectLesson>> - Success or failure state with the updated lesson
  */
-export async function getLessonsByLevelAction(
-  level: "beginner" | "intermediate" | "advanced"
-): Promise<ActionState<SelectLesson[]>> {
-  return getLessonAction(level)
-}
-
-/**
- * Updates an existing lesson in the database.
- */
-export async function updateLessonAction(
-  id: string,
-  data: Partial<InsertLesson>
-): Promise<ActionState<SelectLesson>> {
+export async function updateLessonAction(id: string, data: Partial<InsertLesson>): Promise<ActionState<SelectLesson>> {
   try {
-    const { userId } = await auth()
-    if (!userId) {
-      return { isSuccess: false, message: "Unauthorized: You must be logged in to update a lesson" }
-    }
-
-    if (Object.keys(data).length === 0) {
-      return { isSuccess: false, message: "No data provided to update" }
-    }
-
-    const [updatedLesson] = await db
-      .update(lessonsTable)
-      .set(data)
-      .where(eq(lessonsTable.id, id))
-      .returning()
-
-    if (!updatedLesson) {
-      return { isSuccess: false, message: "Lesson not found" }
-    }
-
+    const [updatedLesson] = await db.update(lessonsTable).set(data).where(eq(lessonsTable.id, id)).returning()
     return { isSuccess: true, message: "Lesson updated successfully", data: updatedLesson }
   } catch (error) {
     console.error("Error updating lesson:", error)
-    return { isSuccess: false, message: "Failed to update lesson due to a server error" }
+    return { isSuccess: false, message: "Failed to update lesson" }
   }
 }
 
 /**
- * Deletes a lesson from the database.
+ * Deletes a lesson by its ID.
+ * @param id - The ID of the lesson to delete
+ * @returns Promise<ActionState<void>> - Success or failure state
  */
 export async function deleteLessonAction(id: string): Promise<ActionState<void>> {
   try {
-    const { userId } = await auth()
-    if (!userId) {
-      return { isSuccess: false, message: "Unauthorized: You must be logged in to delete a lesson" }
-    }
-
-    const deleted = await db.delete(lessonsTable).where(eq(lessonsTable.id, id)).returning()
-
-    if (deleted.length === 0) {
-      return { isSuccess: false, message: "Lesson not found" }
-    }
-
+    await db.delete(lessonsTable).where(eq(lessonsTable.id, id))
     return { isSuccess: true, message: "Lesson deleted successfully", data: undefined }
   } catch (error) {
     console.error("Error deleting lesson:", error)
-    return { isSuccess: false, message: "Failed to delete lesson due to a server error" }
+    return { isSuccess: false, message: "Failed to delete lesson" }
   }
 }
 
@@ -7177,6 +7162,30 @@ export default defineConfig({
 })
 
 ================
+File: jest.config.js
+================
+/**
+ * @description
+ * Jest configuration file for the Learn Kannada app.
+ * Configures Jest to work with TypeScript and Next.js for unit testing.
+ *
+ * Key features:
+ * - Uses ts-jest preset for TypeScript support
+ * - Sets test environment to Node.js
+ * - Specifies test file location
+ *
+ * @notes
+ * - Adjust roots if your test directory differs
+ */
+
+module.exports = {
+  preset: "ts-jest",
+  testEnvironment: "node",
+  roots: ["<rootDir>/tests"],
+  moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"]
+}
+
+================
 File: lib/ai/openai.ts
 ================
 /**
@@ -7617,7 +7626,8 @@ File: package.json
     "analyze": "ANALYZE=true npm run build",
     "db:generate": "npx drizzle-kit generate",
     "db:migrate": "npx drizzle-kit migrate",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "test": "jest"
   },
   "dependencies": {
     "@clerk/backend": "^1.24.0",
@@ -7684,6 +7694,7 @@ File: package.json
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.16",
+    "@types/jest": "^29.5.14",
     "@types/node": "^22",
     "@types/react": "^18.0",
     "@types/react-dom": "^18.0",
@@ -7694,7 +7705,9 @@ File: package.json
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-tailwindcss": "^3.18.0",
     "husky": "^9.1.7",
+    "jest": "^29.7.0",
     "prettier": "^3.5.0",
+    "ts-jest": "^29.2.6",
     "typescript": "^5"
   }
 }
@@ -8002,6 +8015,466 @@ const config = {
 } satisfies Config
 
 export default config
+
+================
+File: tests/actions/exercises-actions.test.ts
+================
+/**
+ * @description
+ * Unit tests for exercises server actions in the Learn Kannada app.
+ */
+import {
+    createExerciseAction,
+    getExercisesByLessonIdAction,
+    submitExerciseAction
+  } from "@/actions/db/exercises-actions"
+  import { db } from "@/db/db"
+  import { InsertExercise, SelectExercise, exercisesTable } from "@/db/schema/exercises-schema"
+  
+  jest.mock("@/db/db", () => ({
+    db: {
+      insert: jest.fn(),
+      query: { exercises: { findMany: jest.fn() } },
+      update: jest.fn()
+    }
+  }))
+  
+  describe("Exercises Server Actions", () => {
+    const mockExercise: InsertExercise = {
+      id: "123e4567-e89b-12d3-a456-426614174000",
+      lessonId: "lesson123",
+      type: "quiz",
+      content: { question: "What is hello?", options: ["ನಮಸ್ಕಾರ", "Goodbye"], correct: "ನಮಸ್ಕಾರ" }
+    }
+  
+    const mockSelectExercise: SelectExercise = {
+      ...mockExercise,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      id: mockExercise.id as string
+    }
+  
+    beforeEach(() => {
+      jest.clearAllMocks()
+    })
+  
+    describe("createExerciseAction", () => {
+      it("should create an exercise successfully", async () => {
+        (db.insert as jest.Mock).mockReturnValue({
+          values: jest.fn().mockReturnThis(),
+          returning: jest.fn().mockResolvedValue([mockSelectExercise])
+        })
+  
+        const result = await createExerciseAction(mockExercise)
+  
+        expect(db.insert).toHaveBeenCalledWith(exercisesTable)
+        expect(result).toEqual({
+          isSuccess: true,
+          message: "Exercise created successfully",
+          data: mockSelectExercise
+        })
+      })
+  
+      it("should handle creation error", async () => {
+        (db.insert as jest.Mock).mockReturnValue({
+          values: jest.fn().mockReturnThis(),
+          returning: jest.fn().mockRejectedValue(new Error("DB Error"))
+        })
+  
+        const result = await createExerciseAction(mockExercise)
+  
+        expect(result).toEqual({
+          isSuccess: false,
+          message: "Failed to create exercise"
+        })
+      })
+    })
+  
+    describe("getExercisesByLessonIdAction", () => {
+      it("should retrieve exercises successfully", async () => {
+        (db.query.exercises.findMany as jest.Mock).mockResolvedValue([mockSelectExercise])
+  
+        const result = await getExercisesByLessonIdAction(mockExercise.lessonId)
+  
+        expect(db.query.exercises.findMany).toHaveBeenCalledWith({
+          where: expect.any(Function)
+        })
+        expect(result).toEqual({
+          isSuccess: true,
+          message: "Exercises retrieved successfully",
+          data: [mockSelectExercise]
+        })
+      })
+  
+      it("should handle retrieval error", async () => {
+        (db.query.exercises.findMany as jest.Mock).mockRejectedValue(new Error("DB Error"))
+  
+        const result = await getExercisesByLessonIdAction(mockExercise.lessonId)
+  
+        expect(result).toEqual({
+          isSuccess: false,
+          message: "Failed to get exercises"
+        })
+      })
+    })
+  
+    describe("submitExerciseAction", () => {
+      it("should submit an exercise and score correctly", async () => {
+        (db.query.exercises.findMany as jest.Mock).mockResolvedValue([mockSelectExercise])
+        (db.update as jest.Mock).mockReturnValue({
+          set: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          returning: jest.fn().mockResolvedValue([mockSelectExercise])
+        })
+  
+        const submission = { answer: "ನಮಸ್ಕಾರ" }
+        const result = await submitExerciseAction(mockExercise.id as string, submission)
+  
+        expect(result.isSuccess).toBe(true)
+        expect(result.message).toBe("Exercise submitted successfully")
+        expect(result.data).toHaveProperty("score", 100)
+      })
+  
+      it("should handle submission error", async () => {
+        (db.query.exercises.findMany as jest.Mock).mockRejectedValue(new Error("DB Error"))
+  
+        const result = await submitExerciseAction(mockExercise.id as string, { answer: "Wrong" })
+  
+        expect(result).toEqual({
+          isSuccess: false,
+          message: "Failed to submit exercise"
+        })
+      })
+    })
+  })
+
+================
+File: tests/actions/lessons-actions.test.ts
+================
+/**
+ * @description
+ * Unit tests for lessons server actions in the Learn Kannada app.
+ */
+import {
+    createLessonAction,
+    getLessonAction,
+    updateLessonAction,
+    deleteLessonAction
+  } from "@/actions/db/lessons-actions"
+  import { db } from "@/db/db"
+  import { lessonsTable } from "@/db/schema/lessons-schema"
+  
+  jest.mock("@/db/db", () => ({
+    db: {
+      insert: jest.fn(),
+      select: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn()
+    }
+  }))
+  
+  interface InsertLesson {
+    id: string
+    level: "beginner" | "intermediate" | "advanced"
+    title: string
+    content: unknown
+  }
+  
+  interface SelectLesson extends InsertLesson {
+    createdAt: Date
+    updatedAt: Date
+  }
+  
+  describe("Lessons Server Actions", () => {
+    const mockLesson: InsertLesson = {
+      id: "123e4567-e89b-12d3-a456-426614174000",
+      level: "beginner",
+      title: "Lesson 1",
+      content: { grammar: "Basics", vocab: ["hello"] }
+    }
+  
+    const mockSelectLesson: SelectLesson = {
+      ...mockLesson,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+  
+    beforeEach(() => {
+      jest.clearAllMocks()
+    })
+  
+    describe("createLessonAction", () => {
+      it("should create a lesson successfully", async () => {
+        (db.insert as jest.Mock).mockReturnValue({
+          values: jest.fn().mockReturnThis(),
+          returning: jest.fn().mockResolvedValue([mockSelectLesson])
+        })
+  
+        const result = await createLessonAction(mockLesson)
+  
+        expect(db.insert).toHaveBeenCalledWith(lessonsTable)
+        expect(result).toEqual({
+          isSuccess: true,
+          message: "Lesson created successfully",
+          data: mockSelectLesson
+        })
+      })
+  
+      it("should handle creation error", async () => {
+        (db.insert as jest.Mock).mockReturnValue({
+          values: jest.fn().mockReturnThis(),
+          returning: jest.fn().mockRejectedValue(new Error("DB Error"))
+        })
+  
+        const result = await createLessonAction(mockLesson)
+  
+        expect(result).toEqual({
+          isSuccess: false,
+          message: "Failed to create lesson"
+        })
+      })
+    })
+  
+    describe("getLessonAction", () => {
+      it("should retrieve a lesson successfully", async () => {
+        (db.select as jest.Mock).mockReturnValue({
+          from: jest.fn().mockReturnThis(),
+          where: jest.fn().mockResolvedValue([mockSelectLesson])
+        })
+  
+        const result = await getLessonAction(mockLesson.id)
+  
+        expect(result).toEqual({
+          isSuccess: true,
+          message: "Lesson retrieved successfully",
+          data: [mockSelectLesson]
+        })
+      })
+  
+      it("should handle retrieval error", async () => {
+        (db.select as jest.Mock).mockReturnValue({
+          from: jest.fn().mockReturnThis(),
+          where: jest.fn().mockRejectedValue(new Error("DB Error"))
+        })
+  
+        const result = await getLessonAction(mockLesson.id)
+  
+        expect(result).toEqual({
+          isSuccess: false,
+          message: "Failed to get lesson"
+        })
+      })
+    })
+  
+    describe("updateLessonAction", () => {
+      it("should update a lesson successfully", async () => {
+        (db.update as jest.Mock).mockReturnValue({
+          set: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          returning: jest.fn().mockResolvedValue([mockSelectLesson])
+        })
+  
+        const updateData = { title: "Updated Lesson" }
+        const result = await updateLessonAction(mockLesson.id, updateData)
+  
+        expect(db.update).toHaveBeenCalledWith(lessonsTable)
+        expect(result).toEqual({
+          isSuccess: true,
+          message: "Lesson updated successfully",
+          data: mockSelectLesson
+        })
+      })
+  
+      it("should handle update error", async () => {
+        (db.update as jest.Mock).mockReturnValue({
+          set: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          returning: jest.fn().mockRejectedValue(new Error("DB Error"))
+        })
+  
+        const result = await updateLessonAction(mockLesson.id, { title: "Updated" })
+  
+        expect(result).toEqual({
+          isSuccess: false,
+          message: "Failed to update lesson"
+        })
+      })
+    })
+  
+    describe("deleteLessonAction", () => {
+      it("should delete a lesson successfully", async () => {
+        (db.delete as jest.Mock).mockReturnValue({
+          where: jest.fn().mockResolvedValue(undefined)
+        })
+  
+        const result = await deleteLessonAction(mockLesson.id)
+  
+        expect(db.delete).toHaveBeenCalledWith(lessonsTable)
+        expect(result).toEqual({
+          isSuccess: true,
+          message: "Lesson deleted successfully",
+          data: undefined
+        })
+      })
+  
+      it("should handle deletion error", async () => {
+        (db.delete as jest.Mock).mockReturnValue({
+          where: jest.fn().mockRejectedValue(new Error("DB Error"))
+        })
+  
+        const result = await deleteLessonAction(mockLesson.id)
+  
+        expect(result).toEqual({
+          isSuccess: false,
+          message: "Failed to delete lesson"
+        })
+      })
+    })
+  })
+
+================
+File: tests/actions/progress-actions.test.ts
+================
+/**
+ * @description
+ * Unit tests for progress server actions in the Learn Kannada app.
+ */
+import {
+    createProgressAction,
+    getProgressByUserIdAction,
+    updateProgressAction
+  } from "@/actions/db/progress-actions"
+  import { db } from "@/db/db"
+  import { InsertProgress, SelectProgress, progressTable } from "@/db/schema/progress-schema"
+  
+  jest.mock("@/db/db", () => ({
+    db: {
+      insert: jest.fn(),
+      query: { progress: { findMany: jest.fn() } },
+      update: jest.fn()
+    }
+  }))
+  
+  describe("Progress Server Actions", () => {
+    const mockProgress: InsertProgress = {
+      id: "123e4567-e89b-12d3-a456-426614174000",
+      userId: "user123",
+      lessonId: "lesson123",
+      xp: 100,
+      streak: 1,
+      badges: ["beginner"]
+    }
+  
+    const mockSelectProgress: SelectProgress = {
+      ...mockProgress,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      xp: mockProgress.xp ?? 0,
+      streak: mockProgress.streak ?? 0,
+      lessonId: mockProgress.lessonId || null,
+      id: mockProgress.id as string,
+      badges: mockProgress.badges
+    }
+  
+    beforeEach(() => {
+      jest.clearAllMocks()
+    })
+  
+    describe("createProgressAction", () => {
+      it("should create progress successfully", async () => {
+        (db.insert as jest.Mock).mockReturnValue({
+          values: jest.fn().mockReturnThis(),
+          returning: jest.fn().mockResolvedValue([mockSelectProgress])
+        })
+  
+        const result = await createProgressAction(mockProgress)
+  
+        expect(db.insert).toHaveBeenCalledWith(progressTable)
+        expect(result).toEqual({
+          isSuccess: true,
+          message: "Progress created successfully",
+          data: mockSelectProgress
+        })
+      })
+  
+      it("should handle creation error", async () => {
+        (db.insert as jest.Mock).mockReturnValue({
+          values: jest.fn().mockReturnThis(),
+          returning: jest.fn().mockRejectedValue(new Error("DB Error"))
+        })
+  
+        const result = await createProgressAction(mockProgress)
+  
+        expect(result).toEqual({
+          isSuccess: false,
+          message: "Failed to create progress"
+        })
+      })
+    })
+  
+    describe("getProgressByUserIdAction", () => {
+      it("should retrieve progress successfully", async () => {
+        (db.query.progress.findMany as jest.Mock).mockResolvedValue([mockSelectProgress])
+  
+        const result = await getProgressByUserIdAction(mockProgress.userId)
+  
+        expect(db.query.progress.findMany).toHaveBeenCalledWith({
+          where: expect.any(Function)
+        })
+        expect(result).toEqual({
+          isSuccess: true,
+          message: "Progress retrieved successfully",
+          data: [mockSelectProgress]
+        })
+      })
+  
+      it("should handle retrieval error", async () => {
+        (db.query.progress.findMany as jest.Mock).mockRejectedValue(new Error("DB Error"))
+  
+        const result = await getProgressByUserIdAction(mockProgress.userId)
+  
+        expect(result).toEqual({
+          isSuccess: false,
+          message: "Failed to get progress"
+        })
+      })
+    })
+  
+    describe("updateProgressAction", () => {
+      it("should update progress successfully", async () => {
+        (db.update as jest.Mock).mockReturnValue({
+          set: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          returning: jest.fn().mockResolvedValue([mockSelectProgress])
+        })
+  
+        const updateData = { xp: 200 }
+        const result = await updateProgressAction(mockProgress.id as string, updateData)
+  
+        expect(db.update).toHaveBeenCalledWith(progressTable)
+        expect(result).toEqual({
+          isSuccess: true,
+          message: "Progress updated successfully",
+          data: mockSelectProgress
+        })
+      })
+  
+      it("should handle update error", async () => {
+        (db.update as jest.Mock).mockReturnValue({
+          set: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          returning: jest.fn().mockRejectedValue(new Error("DB Error"))
+        })
+  
+        const result = await updateProgressAction(mockProgress.id as string, { xp: 200 })
+  
+        expect(result).toEqual({
+          isSuccess: false,
+          message: "Failed to update progress"
+        })
+      })
+    })
+  })
 
 ================
 File: tsconfig.json

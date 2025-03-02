@@ -1,87 +1,117 @@
 /**
  * @description
- * This server component renders a reusable card for displaying lesson previews in the Learn Kannada app.
- * It is designed to show a lesson's title, level (beginner, intermediate, advanced), and optionally the user's progress.
- * The component is used within server-side rendered pages like /learn/[level]/page.tsx to provide a consistent UI.
+ * This component renders a lesson card for the Learn Kannada app, displaying lesson details
+ * such as title and level, with an added text-to-speech feature for accessibility.
+ * It is a reusable client component used across the learning module pages.
  *
  * Key features:
- * - Displays lesson title and level with clear typography
- * - Optionally shows progress as a percentage with a progress bar
- * - Uses Tailwind CSS and Shadcn Card for a clean, minimalistic, responsive design
- * - Accessible with ARIA labels for screen readers
+ * - Displays lesson title and level with clean, minimalistic styling
+ * - Text-to-speech: Reads lesson title aloud when triggered
+ * - Responsive design using Tailwind CSS
  *
  * @dependencies
- * - @/components/ui/card: Shadcn Card component for consistent UI styling
- * - @/components/ui/progress: Shadcn Progress component for progress visualization
- * - @/db/schema/lessons-schema: Imports levelEnum for type safety on lesson levels
+ * - react: For state management and hooks
+ * - lucide-react: For icons (e.g., Volume2 for TTS button)
+ * - @/types: For ActionState type (not directly used here but part of ecosystem)
  *
  * @notes
- * - This is a server component, so it cannot include client-side interactivity (e.g., hooks)
- * - Progress is optional and only rendered if provided, defaulting to hidden
- * - Assumes parent component fetches and passes lesson data
- * - No direct data fetching here; relies on props for simplicity and reusability
+ * - Uses Web Speech API, which requires browser support (checked at runtime)
+ * - Speech synthesis is set to Kannada language ("kn-IN") for consistency
+ * - Error handling for lack of TTS support is minimal (disabled button)
+ * - Assumes lesson content is simple text for now; expand for complex content if needed
  */
 
-"use server"
+"use client"
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Progress } from "@/components/ui/progress"
-import { levelEnum } from "@/db/schema/lessons-schema"
+import { useState } from "react"
+import { Volume2 } from "lucide-react"
 
-// Define props interface for type safety
+/**
+ * Props for the LessonCard component.
+ * Defines the structure of the lesson data passed to the component.
+ */
 interface LessonCardProps {
-  title: string // Lesson title, required
-  level: (typeof levelEnum.enumValues)[number] // Lesson level, constrained to enum values
-  progress?: number // Optional progress percentage (0-100)
+  lesson: {
+    id: string
+    title: string
+    level: "beginner" | "intermediate" | "advanced"
+    content: unknown // JSON content, not rendered here but available
+    createdAt: Date
+    updatedAt: Date
+  }
 }
 
 /**
- * LessonCard component renders a preview of a lesson.
+ * LessonCard component.
+ * Displays a lesson preview with a button to trigger text-to-speech functionality.
+ *
  * @param {LessonCardProps} props - The lesson data to display
- * @returns {JSX.Element} A styled card with lesson details
+ * @returns {JSX.Element} The rendered lesson card
  */
-export async function LessonCard({ title, level, progress }: LessonCardProps) {
-  // Validate progress value if provided
-  const validProgress =
-    progress !== undefined && progress >= 0 && progress <= 100
-      ? progress
-      : undefined
+export default function LessonCard({ lesson }: LessonCardProps) {
+  const [isSpeaking, setIsSpeaking] = useState(false)
+
+  // Check if Web Speech API is supported
+  const isSpeechSupported =
+    typeof window !== "undefined" && "speechSynthesis" in window
+
+  /**
+   * Triggers text-to-speech for the lesson title.
+   * Uses the Web Speech API to read the title aloud in Kannada.
+   */
+  const handleSpeak = () => {
+    if (!isSpeechSupported) return // Exit if not supported
+
+    const utterance = new SpeechSynthesisUtterance(lesson.title)
+    utterance.lang = "kn-IN" // Set language to Kannada
+    utterance.rate = 1.0 // Normal speed
+    utterance.pitch = 1.0 // Normal pitch
+
+    // Handle speech events
+    utterance.onstart = () => setIsSpeaking(true)
+    utterance.onend = () => setIsSpeaking(false)
+    utterance.onerror = event => {
+      console.error("Speech synthesis error:", event.error)
+      setIsSpeaking(false)
+    }
+
+    // Cancel any ongoing speech and start new utterance
+    window.speechSynthesis.cancel()
+    window.speechSynthesis.speak(utterance)
+  }
 
   return (
-    <Card className="border-border w-full max-w-md border shadow-sm transition-shadow hover:shadow-md">
-      <CardHeader>
-        <CardTitle className="text-foreground text-xl font-semibold">
-          {title}
-        </CardTitle>
-        {/* Capitalize level for display */}
-        <div
-          className="text-muted-foreground text-sm capitalize"
-          aria-label={`Level: ${level}`}
-        >
-          {level}
-        </div>
-      </CardHeader>
+    <div className="bg-card rounded-lg border p-4 shadow-sm transition-shadow hover:shadow-md">
+      {/* Lesson Title */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-foreground text-xl font-semibold">
+          {lesson.title}
+        </h2>
 
-      <CardContent>
-        {validProgress !== undefined && (
-          <div className="mt-4">
-            {/* Progress label for accessibility */}
-            <div
-              className="text-muted-foreground mb-2 text-sm"
-              aria-label={`Progress: ${validProgress}%`}
-            >
-              Progress: {validProgress}%
-            </div>
-            <Progress
-              value={validProgress}
-              className="w-full"
-              aria-label={`Progress bar at ${validProgress}%`}
-            />
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        {/* Text-to-Speech Button */}
+        <button
+          onClick={handleSpeak}
+          disabled={!isSpeechSupported || isSpeaking}
+          className={`rounded-full p-2 transition-colors ${
+            isSpeechSupported
+              ? "text-muted-foreground hover:text-primary"
+              : "text-muted cursor-not-allowed"
+          } ${isSpeaking ? "animate-pulse" : ""}`}
+          aria-label="Read lesson title aloud"
+          title={
+            isSpeechSupported
+              ? "Read lesson title aloud"
+              : "Text-to-speech not supported"
+          }
+        >
+          <Volume2 className="size-5" />
+        </button>
+      </div>
+
+      {/* Lesson Level */}
+      <div className="text-muted-foreground mt-2 text-sm">
+        Level: {lesson.level.charAt(0).toUpperCase() + lesson.level.slice(1)}
+      </div>
+    </div>
   )
 }
-
-export default LessonCard
