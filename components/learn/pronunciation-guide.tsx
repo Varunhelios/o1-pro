@@ -1,47 +1,44 @@
 /**
  * @description
  * This client-side component provides a pronunciation guide for the Learn Kannada app.
- * It leverages the Web Speech API to record user speech, transcribe it, and display the result,
- * enabling pronunciation practice for Kannada phrases. Designed for use in lesson pages
- * (e.g., /learn/[level]/page.tsx) to support interactive learning modules.
+ * It allows users to practice speaking Kannada phrases by recording their speech using
+ * the Web Speech API and displaying the transcribed result. Designed for use in lesson
+ * pages to support interactive pronunciation learning.
  *
  * Key features:
- * - Recording Control: Start/stop recording with a toggle button
- * - Speech Transcription: Displays transcribed speech in real-time
- * - Browser Compatibility: Gracefully handles lack of Web Speech API support
+ * - Phrase Display: Shows the Kannada phrase to practice
+ * - Speech Recording: Uses Web Speech API to record and transcribe user speech
  * - Responsive UI: Clean, minimalistic design with Tailwind CSS and Shadcn components
+ * - Error Handling: Handles unsupported browsers and recognition errors gracefully
  *
  * @dependencies
- * - @/components/ui/button: Shadcn Button for recording controls
+ * - @/components/ui/button: Shadcn Button for record/stop controls
  * - @/components/ui/textarea: Shadcn Textarea for displaying transcription
- * - lucide-react: Provides Mic icon for the button
- * - react: Manages state and effects for recording and transcription
+ * - lucide-react: Provides Mic and Send icons for UI
+ * - react: Manages component state and effects
  *
  * @notes
- * - Uses "kn-IN" language code for Kannada; assumes browser support for this locale
- * - Does not perform assessment here; submits transcript via onSubmit for Step 23
- * - Handles edge cases like browser incompatibility and recognition errors
- * - Assumes Web Speech API is available in modern browsers (Chrome, Edge, etc.)
- * - No direct server actions; relies on parent component to handle submission
+ * - Requires browser support for Web Speech API (SpeechRecognition); falls back gracefully if unsupported
+ * - Language is set to "kn-IN" (Kannada) for accurate recognition
+ * - Submission handler is passed as a prop to allow integration with server actions (e.g., assessPronunciationAction)
+ * - Handles edge cases like empty transcripts or API errors with user feedback
+ * - No direct server actions are called here per client component rules
  */
 
 "use client"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Mic } from "lucide-react"
+import { Mic, Send } from "lucide-react"
 import { useState, useEffect } from "react"
 
-// Add this at the top of the file
-interface SpeechRecognition {
-  new (): SpeechRecognition
-  start(): void
-  stop(): void
-  onresult: (event: SpeechRecognitionEvent) => void
-  onerror: (event: SpeechRecognitionErrorEvent) => void
-  onend: () => void
+// Define props interface for type safety
+interface PronunciationGuideProps {
+  phrase: string // The Kannada phrase to practice
+  onSubmit: (transcript: string) => Promise<void> // Handler to process the recorded speech
 }
 
+// Define types for SpeechRecognitionEvent and SpeechRecognitionErrorEvent
 interface SpeechRecognitionEvent {
   results: SpeechRecognitionResultList
 }
@@ -50,102 +47,98 @@ interface SpeechRecognitionErrorEvent {
   error: string
 }
 
-// Define props interface for the component
-interface PronunciationGuideProps {
-  phrase: string // The Kannada phrase to pronounce
-  onSubmit: (transcript: string) => Promise<void> // Callback to handle the transcribed speech
-}
-
 /**
- * PronunciationGuide component enables users to practice pronunciation using the Web Speech API.
- * @param {PronunciationGuideProps} props - The phrase to pronounce and submission handler
- * @returns {JSX.Element} A UI for recording and reviewing speech
+ * PronunciationGuide component renders a UI for practicing pronunciation.
+ * @param {PronunciationGuideProps} props - Phrase to practice and submission handler
+ * @returns {JSX.Element} A UI with recording controls and transcript display
  */
 export default function PronunciationGuide({
   phrase,
   onSubmit
 }: PronunciationGuideProps) {
-  const [isRecording, setIsRecording] = useState(false) // Tracks recording state
-  const [transcript, setTranscript] = useState("") // Stores the transcribed speech
-  const [isSupported, setIsSupported] = useState(true) // Tracks Web Speech API support
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null) // SpeechRecognition instance
+  // State for recording status, transcript, and API support
+  const [isRecording, setIsRecording] = useState(false)
+  const [transcript, setTranscript] = useState("")
+  const [isSupported, setIsSupported] = useState(true)
 
-  // Initialize SpeechRecognition on mount
+  // Initialize SpeechRecognition API on mount
   useEffect(() => {
-    // Check if SpeechRecognition is supported (standard or webkit prefix)
-    const SpeechRecognition =
+    // Check for SpeechRecognition support (falls back to webkit if needed)
+    const SpeechRecognitionAPI =
       window.SpeechRecognition || window.webkitSpeechRecognition
 
-    if (!SpeechRecognition) {
+    if (!SpeechRecognitionAPI) {
       setIsSupported(false)
       return
     }
 
     // Create and configure the recognition instance
-    const recog = new SpeechRecognition()
-    recog.continuous = false // Stop after one result
-    recog.interimResults = false // Only final results
-    recog.lang = "kn-IN" // Kannada language code
+    const recognition = new SpeechRecognitionAPI()
+    recognition.continuous = false // Stop after one result
+    recognition.interimResults = false // Only final results
+    recognition.lang = "kn-IN" // Kannada language code
 
-    // Handle successful transcription
-    recog.onresult = (event: SpeechRecognitionEvent) => {
-      const result = event.results[0][0].transcript
-      setTranscript(result)
+    // Handle successful recognition
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const spokenText = event.results[0][0].transcript
+      setTranscript(spokenText)
       setIsRecording(false)
     }
 
-    // Handle recognition errors
-    recog.onerror = (event: SpeechRecognitionErrorEvent) => {
+    // Handle errors (e.g., no speech detected, network issues)
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error("Speech recognition error:", event.error)
       setTranscript(`Error: ${event.error}. Please try again.`)
       setIsRecording(false)
     }
 
-    // Cleanup on unmount or error
-    recog.onend = () => setIsRecording(false)
+    // Handle recording toggle
+    const toggleRecording = () => {
+      if (isRecording) {
+        recognition.stop()
+      } else {
+        setTranscript("") // Clear previous transcript
+        recognition.start()
+        setIsRecording(true)
+      }
+    }
 
-    setRecognition(recog)
+    // Add click handler to the button
+    const recordButton = document.getElementById("record-button")
+    if (recordButton) {
+      recordButton.onclick = toggleRecording
+    }
 
-    // Cleanup function to stop recognition if component unmounts
+    // Cleanup to prevent memory leaks
     return () => {
-      if (recog) recog.stop()
-    }
-  }, [])
-
-  // Toggle recording state
-  const toggleRecording = () => {
-    if (!recognition) return
-
-    if (isRecording) {
       recognition.stop()
-    } else {
-      setTranscript("") // Clear previous transcript
-      recognition.start()
-      setIsRecording(true)
+      if (recordButton) {
+        recordButton.onclick = null
+      }
     }
-  }
+  }, [isRecording]) // Re-run effect when recording state changes
 
   // Handle submission of the transcript
   const handleSubmit = async () => {
-    if (transcript.trim() && !isRecording) {
+    if (transcript.trim()) {
       await onSubmit(transcript)
-      setTranscript("") // Reset after submission
+      setTranscript("") // Reset after successful submission
     }
   }
 
   return (
-    <div className="bg-background w-full max-w-md space-y-4 rounded-lg border p-4">
-      {/* Display the phrase to pronounce */}
+    <div className="w-full max-w-lg space-y-6 p-4">
+      {/* Display the phrase to practice */}
       <div className="text-foreground text-lg font-medium">{phrase}</div>
 
-      {/* Recording controls and transcription display */}
+      {/* Recording controls and transcript display */}
       {isSupported ? (
         <>
           <Button
-            onClick={toggleRecording}
-            disabled={!recognition}
-            variant={isRecording ? "destructive" : "default"}
+            id="record-button"
             className="w-full"
+            variant={isRecording ? "destructive" : "default"}
+            disabled={!isSupported}
           >
             <Mic className="mr-2 size-4" />
             {isRecording ? "Stop Recording" : "Start Recording"}
@@ -154,8 +147,8 @@ export default function PronunciationGuide({
           <Textarea
             value={transcript}
             onChange={e => setTranscript(e.target.value)} // Allow manual edits
-            placeholder="Your pronunciation will appear here..."
-            className="h-24 resize-none"
+            placeholder="Your speech will appear here..."
+            className="h-32 resize-none"
             readOnly={isRecording} // Prevent edits during recording
           />
 
@@ -164,13 +157,14 @@ export default function PronunciationGuide({
             disabled={!transcript.trim() || isRecording}
             className="w-full"
           >
-            Submit Pronunciation
+            <Send className="mr-2 size-4" />
+            Submit Speech
           </Button>
         </>
       ) : (
         <div className="text-muted-foreground text-center">
           Speech recognition is not supported in your browser. Please use a
-          modern browser like Chrome or Edge.
+          modern browser like Chrome or Firefox.
         </div>
       )}
     </div>
