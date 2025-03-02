@@ -15,7 +15,7 @@
  * - lucide-react: Provides BookOpen icon for visual enhancement
  *
  * @notes
- * - Assumes content is JSON with a possible 'description' field; falls back to generic text if absent
+ * - Assumes content is JSON with a 'description' field; falls back to generic text if absent
  * - Truncates content to 100 characters for brevity; full content can be viewed on click (future feature)
  * - No interactivity here; client-side features (e.g., clicking to view) to be added in parent components
  * - Matches Step 13's intent as a reusable server component
@@ -28,7 +28,7 @@ import { BookOpen } from "lucide-react"
 
 // Define props interface matching SelectLesson
 interface LessonCardProps {
-  lesson: SelectLesson // Ensure this matches the SelectLesson structure
+  lesson: SelectLesson
 }
 
 /**
@@ -36,8 +36,8 @@ interface LessonCardProps {
  * @param {LessonCardProps} props - The lesson data to display
  * @returns {JSX.Element} A styled card with lesson details
  */
-export default function LessonCard({ lesson }: LessonCardProps) {
-  // Extract content safely; assume it's JSON with a description or similar field
+export default async function LessonCard({ lesson }: LessonCardProps) {
+  // Extract content safely; assume it's JSON with a description field
   const content = lesson.content as { description?: string } | null
   const contentPreview = content?.description
     ? content.description.slice(0, 100) +
