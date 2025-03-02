@@ -2876,80 +2876,177 @@ File: actions/stripe-actions.ts
 ================
 /**
  * @description
- * This file defines server actions for Stripe payment operations in the Learn Kannada app.
- * It handles creating checkout sessions for tutor bookings, updating customer details after one-time payments,
- * and managing subscription status changes. All actions are server-side, adhering to the project's backend and payments rules.
+ * This file contains server actions for managing Stripe payment operations in the Learn Kannada app.
+ * It handles subscription status changes, customer updates, and tutor session checkouts to support the freemium model and premium features.
  *
  * Key features:
- * - Tutor Checkout: Creates a Stripe checkout session for booking live tutor sessions
- * - Customer Update: Updates user profile with Stripe customer ID after a one-time payment
- * - Subscription Management: Updates user profile based on Stripe webhook events
- * - Type Safety: Uses TypeScript interfaces for inputs and outputs
+ * - Subscription Management: Updates user membership based on Stripe subscription status
+ * - Customer Updates: Manages Stripe customer data in the database
+ * - Tutor Checkout: Creates Stripe checkout sessions for tutor bookings
  *
  * @dependencies
- * - @/lib/stripe: Stripe instance initialized with API key
- * - @/db/db: Drizzle ORM instance for database access
- * - @/db/schema/profiles-schema: Profiles table schema for membership updates
- * - @/types/server-action-types: ActionState type for consistent return values
- * - drizzle-orm: For database operations (eq for querying)
+ * - @/db/db: Provides the Drizzle ORM database instance
+ * - @/db/schema/profiles-schema: Imports profilesTable and membershipEnum for database operations
+ * - @/lib/stripe: Provides the configured Stripe client
+ * - @/types: Imports ActionState for type-safe return values
+ * - drizzle-orm: Provides eq for database query conditions
  *
  * @notes
- * - Assumes STRIPE_SECRET_KEY is set in .env.local (from initial setup)
- * - Tutor session price ID is a placeholder; must be replaced with actual Stripe product ID
- * - Success and cancel URLs use NEXT_PUBLIC_BASE_URL from .env.local
- * - No direct client-side Stripe interaction; all logic is server-side per rules
- * - Error handling logs to console and returns meaningful messages
+ * - This is a server-only file, marked with "use server"
+ * - Assumes Stripe webhooks or manual calls provide subscription events
+ * - Environment variables (e.g., STRIPE_TUTOR_PRICE_ID) must be set in .env.local
  */
 
 "use server"
 
-import { stripe } from "@/lib/stripe"
 import { db } from "@/db/db"
-import { profilesTable, InsertProfile } from "@/db/schema/profiles-schema"
-import { ActionState } from "@/types/server-action-types"
+import { profilesTable, membershipEnum } from "@/db/schema/profiles-schema"
+import { stripe } from "@/lib/stripe"
+import { ActionState } from "@/types"
 import { eq } from "drizzle-orm"
 
-// Define parameters for creating a tutor checkout session
-export interface CreateTutorCheckoutSessionParams {
+/**
+ * Interface for subscription status change input.
+ */
+interface SubscriptionStatusChangeInput {
+  stripeSubscriptionId: string
   userId: string
-  successUrl: string
-  cancelUrl: string
-}
-
-// Define response type for tutor checkout session
-interface CheckoutSessionResponse {
-  url: string // URL to redirect the user to for checkout
 }
 
 /**
- * Creates a Stripe checkout session for booking a tutor session.
- * @param {CreateTutorCheckoutSessionParams} params - User ID and redirect URLs
- * @returns {Promise<ActionState<CheckoutSessionResponse>>} Success/failure with checkout URL
+ * Updates a user's membership status based on their Stripe subscription status.
+ *
+ * @param input - Object containing stripeSubscriptionId and userId
+ * @returns Promise<ActionState<void>> - Success or failure state
  */
-export async function createTutorCheckoutSessionAction({
-  userId,
-  successUrl,
-  cancelUrl
-}: CreateTutorCheckoutSessionParams): Promise<ActionState<CheckoutSessionResponse>> {
+export async function manageSubscriptionStatusChangeAction(
+  input: SubscriptionStatusChangeInput
+): Promise<ActionState<void>> {
+  const { stripeSubscriptionId, userId } = input
+
   try {
-    // Create a Stripe checkout session
+    if (!stripeSubscriptionId || !userId) {
+      return { isSuccess: false, message: "Subscription ID and user ID are required" }
+    }
+
+    const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId)
+    const isActive = subscription.status === "active" || subscription.status === "trialing"
+    const newMembership = isActive ? membershipEnum.enumValues[1] : membershipEnum.enumValues[0]
+
+    const updatedProfile = await db
+      .update(profilesTable)
+      .set({
+        membership: newMembership,
+        stripeSubscriptionId: stripeSubscriptionId,
+        updatedAt: new Date()
+      })
+      .where(eq(profilesTable.userId, userId))
+      .returning()
+
+    if (!updatedProfile.length) {
+      return { isSuccess: false, message: "User profile not found or update failed" }
+    }
+
+    return {
+      isSuccess: true,
+      message: `Membership updated to ${newMembership} successfully`,
+      data: undefined
+    }
+  } catch (error) {
+    console.error("Error managing subscription status:", error)
+    return { isSuccess: false, message: "Failed to update subscription status" }
+  }
+}
+
+/**
+ * Interface for customer update input.
+ */
+interface UpdateCustomerInput {
+  userId: string
+  stripeCustomerId: string
+  stripeSubscriptionId?: string
+}
+
+/**
+ * Updates a user's Stripe customer data in the database.
+ *
+ * @param input - Object containing userId, stripeCustomerId, and optional stripeSubscriptionId
+ * @returns Promise<ActionState<void>> - Success or failure state
+ */
+export async function updateStripeCustomerAction(
+  input: UpdateCustomerInput
+): Promise<ActionState<void>> {
+  const { userId, stripeCustomerId, stripeSubscriptionId } = input
+
+  try {
+    if (!userId || !stripeCustomerId) {
+      return { isSuccess: false, message: "User ID and Stripe Customer ID are required" }
+    }
+
+    const updatedProfile = await db
+      .update(profilesTable)
+      .set({
+        stripeCustomerId,
+        stripeSubscriptionId: stripeSubscriptionId || null,
+        updatedAt: new Date()
+      })
+      .where(eq(profilesTable.userId, userId))
+      .returning()
+
+    if (!updatedProfile.length) {
+      return { isSuccess: false, message: "User profile not found or update failed" }
+    }
+
+    return {
+      isSuccess: true,
+      message: "Customer data updated successfully",
+      data: undefined
+    }
+  } catch (error) {
+    console.error("Error updating Stripe customer:", error)
+    return { isSuccess: false, message: "Failed to update customer data" }
+  }
+}
+
+/**
+ * Interface for tutor checkout session input.
+ */
+interface TutorCheckoutInput {
+  userId: string
+}
+
+/**
+ * Creates a Stripe checkout session for a tutor booking.
+ *
+ * @param input - Object containing userId
+ * @returns Promise<ActionState<{ url: string }>> - Success with checkout URL or failure
+ */
+export async function createTutorCheckoutSessionAction(
+  input: TutorCheckoutInput
+): Promise<ActionState<{ url: string }>> {
+  const { userId } = input
+
+  try {
+    if (!userId) {
+      return { isSuccess: false, message: "User ID is required" }
+    }
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       line_items: [
         {
-          // Placeholder price ID; replace with actual Stripe price ID for tutor session
-          price: "price_tutor_session_placeholder", // TODO: Update with real price ID
+          price: process.env.STRIPE_TUTOR_PRICE_ID, // Must be set in .env.local
           quantity: 1
         }
       ],
-      mode: "payment",
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      metadata: { userId } // Store userId for webhook verification if needed
+      mode: "payment", // One-time payment for tutor session
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/community/tutors?success=true`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/community/tutors?canceled=true`,
+      metadata: { userId }
     })
 
     if (!session.url) {
-      throw new Error("Stripe session URL not generated")
+      throw new Error("Failed to create checkout session URL")
     }
 
     return {
@@ -2959,83 +3056,7 @@ export async function createTutorCheckoutSessionAction({
     }
   } catch (error) {
     console.error("Error creating tutor checkout session:", error)
-    return {
-      isSuccess: false,
-      message: "Failed to create checkout session. Please try again."
-    }
-  }
-}
-
-/**
- * Updates user profile with Stripe customer ID after a one-time payment (e.g., tutor session).
- * @param {string} userId - Clerk user ID
- * @param {string} customerId - Stripe customer ID
- * @returns {Promise<ActionState<void>>} Success/failure with no data
- */
-export async function updateStripeCustomerAction(
-  userId: string,
-  customerId: string
-): Promise<ActionState<void>> {
-  try {
-    const profileUpdates: Partial<InsertProfile> = {
-      stripeCustomerId: customerId
-      // No subscription ID or membership change for one-time payments
-    }
-
-    await db
-      .update(profilesTable)
-      .set(profileUpdates)
-      .where(eq(profilesTable.userId, userId))
-
-    return {
-      isSuccess: true,
-      message: "Customer details updated successfully",
-      data: undefined
-    }
-  } catch (error) {
-    console.error("Error updating customer details:", error)
-    return {
-      isSuccess: false,
-      message: "Failed to update customer details"
-    }
-  }
-}
-
-/**
- * Updates user profile based on Stripe subscription events from webhooks.
- * @param {string} userId - Clerk user ID
- * @param {string} subscriptionId - Stripe subscription ID
- * @param {string} customerId - Stripe customer ID
- * @returns {Promise<ActionState<void>>} Success/failure with no data
- */
-export async function manageSubscriptionStatusChange(
-  userId: string,
-  subscriptionId: string,
-  customerId: string
-): Promise<ActionState<void>> {
-  try {
-    const profileUpdates: Partial<InsertProfile> = {
-      stripeSubscriptionId: subscriptionId,
-      stripeCustomerId: customerId,
-      membership: "pro" // Upgrade to pro on successful subscription
-    }
-
-    await db
-      .update(profilesTable)
-      .set(profileUpdates)
-      .where(eq(profilesTable.userId, userId))
-
-    return {
-      isSuccess: true,
-      message: "Subscription status updated successfully",
-      data: undefined
-    }
-  } catch (error) {
-    console.error("Error updating subscription status:", error)
-    return {
-      isSuccess: false,
-      message: "Failed to update subscription status"
-    }
+    return { isSuccess: false, message: "Failed to create tutor checkout session" }
   }
 }
 
@@ -3440,161 +3461,184 @@ export default async function HomePage() {
 ================
 File: app/(marketing)/pricing/page.tsx
 ================
-/*
-This server page displays pricing options for the product, integrating Stripe payment links.
-*/
+/**
+ * @description
+ * This file defines the pricing page for the Learn Kannada app, showcasing the freemium model.
+ * It displays pricing tiers (free and premium) and integrates with Stripe for subscription purchases.
+ *
+ * Key features:
+ * - Pricing Tiers: Displays free and premium plans with features and pricing
+ * - Stripe Integration: Redirects to Stripe checkout for premium subscriptions
+ * - Authentication Check: Personalizes the call-to-action based on user login status
+ *
+ * @dependencies
+ * - @clerk/nextjs/server: Provides auth() for authentication status
+ * - lucide-react: Provides icons for visual enhancement
+ * - next/navigation: Provides notFound for handling invalid routes
+ * - @/lib/stripe: Provides the Stripe client for checkout
+ *
+ * @notes
+ * - This is a server component, marked with "use server"
+ * - Pricing is hardcoded for simplicity; in production, fetch from Stripe products
+ * - Assumes Stripe products are set up manually by the user per instructions
+ * - Uses Tailwind for responsive, minimalistic design per design requests
+ */
 
 "use server"
 
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card"
-import { cn } from "@/lib/utils"
 import { auth } from "@clerk/nextjs/server"
-import { Check } from "lucide-react"
+import { Check, X } from "lucide-react"
+import { notFound } from "next/navigation"
+import { stripe } from "@/lib/stripe"
 
+/**
+ * Pricing tier interface for type safety.
+ */
+interface PricingTier {
+  name: string
+  price: string
+  description: string
+  features: string[]
+  isPremium: boolean
+}
+
+// Define pricing tiers
+const pricingTiers: PricingTier[] = [
+  {
+    name: "Free",
+    price: "$0",
+    description: "Basic lessons to get started",
+    features: [
+      "Access to beginner lessons",
+      "Basic exercises",
+      "Community chat"
+    ],
+    isPremium: false
+  },
+  {
+    name: "Premium",
+    price: "$9.99/month",
+    description: "Full access to advanced features",
+    features: [
+      "All beginner, intermediate, and advanced lessons",
+      "Premium exercises with AI feedback",
+      "Live tutor sessions",
+      "Offline mode"
+    ],
+    isPremium: true
+  }
+]
+
+/**
+ * Renders the pricing page with free and premium tiers.
+ * Redirects to Stripe checkout for premium subscriptions.
+ *
+ * @returns {JSX.Element} The pricing page UI
+ */
 export default async function PricingPage() {
   const { userId } = await auth()
 
-  const features = [
-    "All core features",
-    "Priority support",
-    "Advanced analytics",
-    "Custom integrations",
-    "API access",
-    "Team collaboration"
-  ]
-
-  return (
-    <div className="container mx-auto max-w-5xl px-4 py-12">
-      <div className="mx-auto mb-12 max-w-2xl text-center">
-        <h1 className="mb-4 text-4xl font-bold">Simple, Transparent Pricing</h1>
-        <p className="text-muted-foreground">
-          Choose the plan that best fits your needs. All plans include a 14-day
-          free trial.
-        </p>
-      </div>
-
-      <div className="mx-auto grid max-w-4xl grid-cols-1 gap-8 md:grid-cols-2">
-        <PricingCard
-          title="Monthly Plan"
-          price="$10"
-          description="Perfect for individuals and small teams"
-          buttonText="Subscribe Monthly"
-          buttonLink={
-            process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK_MONTHLY || "#"
+  // Handle Stripe checkout redirect for premium plan
+  async function handlePremiumCheckout() {
+    "use server"
+    try {
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: [
+          {
+            price: process.env.STRIPE_PREMIUM_PRICE_ID, // Set in .env.local
+            quantity: 1
           }
-          features={features}
-          userId={userId}
-          popular={false}
-        />
-        <PricingCard
-          title="Yearly Plan"
-          price="$100"
-          description="Save 17% with annual billing"
-          buttonText="Subscribe Yearly"
-          buttonLink={process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK_YEARLY || "#"}
-          features={features}
-          userId={userId}
-          popular={true}
-        />
-      </div>
+        ],
+        mode: "subscription",
+        success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?success=true`,
+        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/pricing?canceled=true`,
+        metadata: { userId: userId || "" }
+      })
 
-      <p className="text-muted-foreground mt-8 text-center text-sm">
-        All prices are in USD. Need a custom plan?{" "}
-        <a href="/contact" className="font-medium underline underline-offset-4">
-          Contact us
-        </a>
-      </p>
-    </div>
-  )
-}
-
-interface PricingCardProps {
-  title: string
-  price: string
-  description: string
-  buttonText: string
-  buttonLink: string
-  features: string[]
-  userId: string | null
-  popular: boolean
-}
-
-function PricingCard({
-  title,
-  price,
-  description,
-  buttonText,
-  buttonLink,
-  features,
-  userId,
-  popular
-}: PricingCardProps) {
-  const finalButtonLink = userId
-    ? `${buttonLink}?client_reference_id=${userId}`
-    : buttonLink
+      if (session.url) {
+        return { redirect: session.url }
+      }
+      throw new Error("Failed to create checkout session")
+    } catch (error) {
+      console.error("Error creating checkout session:", error)
+      throw error
+    }
+  }
 
   return (
-    <Card
-      className={cn(
-        "relative flex h-full flex-col",
-        popular && "border-primary shadow-lg"
-      )}
-    >
-      {popular && (
-        <div className="bg-primary text-primary-foreground absolute -top-4 left-1/2 -translate-x-1/2 rounded-full px-3 py-1 text-sm font-medium">
-          Most Popular
-        </div>
-      )}
+    <div className="bg-background min-h-screen py-12">
+      <div className="container mx-auto px-4">
+        <h1 className="text-foreground mb-12 text-center text-4xl font-bold">
+          Choose Your Plan
+        </h1>
 
-      <CardHeader>
-        <CardTitle className="text-2xl">{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
+        <div className="mx-auto grid max-w-4xl grid-cols-1 gap-8 md:grid-cols-2">
+          {pricingTiers.map(tier => (
+            <div
+              key={tier.name}
+              className={`rounded-lg border p-6 shadow-md ${
+                tier.isPremium
+                  ? "border-primary bg-primary/10"
+                  : "border-muted bg-card"
+              }`}
+            >
+              <h2
+                className={`mb-2 text-2xl font-semibold ${
+                  tier.isPremium ? "text-primary" : "text-foreground"
+                }`}
+              >
+                {tier.name}
+              </h2>
+              <p className="text-foreground mb-4 text-3xl font-bold">
+                {tier.price}
+              </p>
+              <p className="text-muted-foreground mb-6">{tier.description}</p>
 
-      <CardContent className="grow">
-        <div className="mb-6 flex items-baseline justify-center gap-x-2">
-          <span className="text-5xl font-bold">{price}</span>
-          <span className="text-muted-foreground">/month</span>
-        </div>
+              <ul className="mb-6 space-y-2">
+                {tier.features.map(feature => (
+                  <li key={feature} className="flex items-center">
+                    <Check
+                      className={`mr-2 size-5 ${
+                        tier.isPremium ? "text-primary" : "text-green-500"
+                      }`}
+                    />
+                    <span className="text-foreground">{feature}</span>
+                  </li>
+                ))}
+              </ul>
 
-        <ul className="space-y-3">
-          {features.map((feature, index) => (
-            <li key={index} className="flex items-center gap-x-2">
-              <Check className="text-primary size-4" />
-              <span className="text-muted-foreground text-sm">{feature}</span>
-            </li>
+              <form
+                onSubmit={async e => {
+                  e.preventDefault() // Prevent the default form submission
+                  const result = await handlePremiumCheckout() // Call the checkout function
+                  if (result && result.redirect) {
+                    window.location.href = result.redirect // Redirect to the checkout URL
+                  }
+                }}
+                className="w-full"
+              >
+                <button
+                  type={tier.isPremium ? "submit" : "button"}
+                  className={`w-full rounded-md py-2 font-medium ${
+                    tier.isPremium
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                  }`}
+                  disabled={!tier.isPremium && !userId}
+                >
+                  {tier.isPremium
+                    ? userId
+                      ? "Get Premium"
+                      : "Sign In to Subscribe"
+                    : "Free Plan"}
+                </button>
+              </form>
+            </div>
           ))}
-        </ul>
-      </CardContent>
-
-      <CardFooter>
-        <Button
-          className={cn(
-            "w-full",
-            popular && "bg-primary text-primary-foreground hover:bg-primary/90"
-          )}
-          asChild
-        >
-          <a
-            href={finalButtonLink}
-            className={cn(
-              "inline-flex items-center justify-center",
-              finalButtonLink === "#" && "pointer-events-none opacity-50"
-            )}
-          >
-            {buttonText}
-          </a>
-        </Button>
-      </CardFooter>
-    </Card>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -3603,59 +3647,53 @@ File: app/api/stripe/webhooks/route.ts
 ================
 /**
  * @description
- * This file defines the Stripe webhook endpoint for the Learn Kannada app.
- * It handles incoming Stripe events, such as checkout session completions,
- * to update user profiles accordingly. This is a server-side API route.
+ * This file defines a Stripe webhook endpoint for the Learn Kannada app.
+ * It processes Stripe events (e.g., checkout completion) to update user subscription status and customer data.
  *
  * Key features:
- * - Webhook Verification: Validates Stripe signatures for security
- * - Event Handling: Processes checkout.session.completed for tutor sessions
- * - Integration: Updates user profile via server actions
+ * - Webhook Verification: Ensures events come from Stripe using the webhook secret
+ * - Event Handling: Processes checkout.session.completed to update membership and customer info
  *
  * @dependencies
- * - @/actions/stripe-actions: For updating customer details (updateStripeCustomerAction)
- * - @/lib/stripe: Stripe instance for webhook verification
- * - next/headers: For accessing request headers
+ * - @clerk/nextjs/server: Provides auth for user verification
+ * - next/server: Provides NextRequest and NextResponse for API handling
+ * - @/actions/stripe-actions: Imports actions for subscription and customer updates
+ * - @/lib/stripe: Provides the Stripe client
  *
  * @notes
- * - Requires STRIPE_WEBHOOK_SECRET in .env.local for signature verification
- * - Returns appropriate HTTP responses (200 for success, 400 for errors)
- * - Logs errors to console for debugging; consider a proper logging solution in production
- * - Assumes userId is stored in checkout session metadata from createTutorCheckoutSessionAction
+ * - Expects STRIPE_WEBHOOK_SECRET in .env.local
+ * - Returns 400 for unverified or unhandled events, 200 for success
  */
 
-import { NextResponse } from "next/server"
+import { auth } from "@clerk/nextjs/server"
+import { NextRequest, NextResponse } from "next/server"
 import {
-  manageSubscriptionStatusChange,
+  manageSubscriptionStatusChangeAction,
   updateStripeCustomerAction
 } from "@/actions/stripe-actions"
 import { stripe } from "@/lib/stripe"
-import { headers } from "next/headers"
 
 /**
  * Handles POST requests to the Stripe webhook endpoint.
- * @param {Request} request - Incoming webhook request from Stripe
- * @returns {Promise<NextResponse>} HTTP response indicating success or failure
+ *
+ * @param request - The incoming Next.js request
+ * @returns NextResponse - HTTP response with status
  */
-export async function POST(request: Request) {
-  const body = await request.text()
-  const signature = (await headers()).get("Stripe-Signature") as string
+export async function POST(request: NextRequest) {
+  const sig = request.headers.get("stripe-signature")
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET
 
-  if (!process.env.STRIPE_WEBHOOK_SECRET) {
-    console.error("STRIPE_WEBHOOK_SECRET is not set in .env.local")
+  if (!sig || !webhookSecret) {
     return NextResponse.json(
-      { error: "Webhook secret not configured" },
+      { error: "Missing webhook signature or secret" },
       { status: 400 }
     )
   }
 
   let event
   try {
-    event = stripe.webhooks.constructEvent(
-      body,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET
-    )
+    const body = await request.text()
+    event = stripe.webhooks.constructEvent(body, sig, webhookSecret)
   } catch (error) {
     console.error("Webhook signature verification failed:", error)
     return NextResponse.json(
@@ -3664,41 +3702,57 @@ export async function POST(request: Request) {
     )
   }
 
-  try {
-    switch (event.type) {
-      case "checkout.session.completed": {
-        const session = event.data.object
-        const userId = session.metadata?.userId
-        const customerId = session.customer as string
+  switch (event.type) {
+    case "checkout.session.completed":
+      const session = event.data.object as any
+      const userId = session.metadata?.userId
+      const stripeSubscriptionId = session.subscription
+      const stripeCustomerId = session.customer
 
-        if (!userId || !customerId) {
-          console.error("Missing userId or customerId in session:", session)
+      if (!userId || !stripeCustomerId) {
+        return NextResponse.json(
+          { error: "Missing userId or customerId in session metadata" },
+          { status: 400 }
+        )
+      }
+
+      // Update customer data
+      const customerResult = await updateStripeCustomerAction({
+        userId,
+        stripeCustomerId,
+        stripeSubscriptionId
+      })
+      if (!customerResult.isSuccess) {
+        console.error("Customer update failed:", customerResult.message)
+        return NextResponse.json(
+          { error: customerResult.message },
+          { status: 500 }
+        )
+      }
+
+      // Update subscription status if applicable
+      if (stripeSubscriptionId) {
+        const subscriptionResult = await manageSubscriptionStatusChangeAction({
+          userId,
+          stripeSubscriptionId
+        })
+        if (!subscriptionResult.isSuccess) {
+          console.error(
+            "Subscription update failed:",
+            subscriptionResult.message
+          )
           return NextResponse.json(
-            { error: "Invalid session data" },
-            { status: 400 }
+            { error: subscriptionResult.message },
+            { status: 500 }
           )
         }
-
-        // Update customer details for one-time payment (e.g., tutor session)
-        const result = await updateStripeCustomerAction(userId, customerId)
-        if (!result.isSuccess) {
-          console.error("Failed to update customer:", result.message)
-          return NextResponse.json({ error: result.message }, { status: 400 })
-        }
-        break
       }
-      // Add other event types (e.g., subscription events) as needed
-      default:
-        console.log(`Unhandled event type: ${event.type}`)
-    }
 
-    return NextResponse.json({ received: true }, { status: 200 })
-  } catch (error) {
-    console.error("Error processing webhook event:", error)
-    return NextResponse.json(
-      { error: "Failed to process webhook" },
-      { status: 400 }
-    )
+      return NextResponse.json({ received: true }, { status: 200 })
+
+    default:
+      console.log(`Unhandled event type ${event.type}`)
+      return NextResponse.json({ received: true }, { status: 200 })
   }
 }
 
@@ -3906,144 +3960,107 @@ File: app/community/tutors/page.tsx
 ================
 /**
  * @description
- * This server-side page renders the tutor booking interface for the Learn Kannada app.
- * It allows premium users to book live tutor sessions by integrating with Stripe for payment.
- * Accessible only to authenticated users with a "pro" membership, it provides a clean UI
- * with a checkout button redirecting to Stripe.
+ * This file defines the tutor booking page for the Learn Kannada app.
+ * It allows premium users to book live tutor sessions via Stripe checkout.
  *
  * Key features:
- * - Authentication: Uses Clerk to ensure user is logged in
- * - Authorization: Checks for "pro" membership via profiles table
- * - Stripe Integration: Creates a checkout session via server action
- * - UI: Minimalistic design with Tailwind and Shadcn Button component
+ * - Authentication Check: Ensures only signed-in users can book
+ * - Stripe Integration: Redirects to Stripe checkout for tutor sessions
  *
  * @dependencies
- * - @clerk/nextjs/server: For authentication (auth helper)
- * - @/actions/stripe-actions: For creating Stripe checkout sessions (createTutorCheckoutSessionAction)
- * - @/actions/db/profiles-actions: For fetching user profile (getProfileByUserIdAction)
- * - @/components/ui/button: Shadcn Button for the checkout UI
- * - next/navigation: For redirecting unauthenticated users
+ * - @clerk/nextjs/server: Provides auth for user verification
+ * - lucide-react: Provides icons for UI
+ * - @/actions/stripe-actions: Imports createTutorCheckoutSessionAction
  *
  * @notes
- * - This is a server component, marked with "use server" per frontend rules
- * - Assumes a Stripe product for tutor sessions is configured (user instruction provided)
- * - No client-side state management; all data fetching is server-side
- * - Error handling includes redirecting unauthenticated users and displaying membership errors
- * - Edge case: Non-premium users see a message instead of the checkout button
+ * - This is a server component, marked with "use server"
+ * - Expects STRIPE_TUTOR_PRICE_ID in .env.local
  */
 
 "use server"
 
 import { auth } from "@clerk/nextjs/server"
-import { redirect } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import {
-  createTutorCheckoutSessionAction,
-  CreateTutorCheckoutSessionParams
-} from "@/actions/stripe-actions"
-import { getProfileByUserIdAction } from "@/actions/db/profiles-actions"
-
-// Define props interface for the page (Next.js dynamic route params)
-interface TutorPageProps {
-  params: Promise<{}> // No dynamic params needed, but included for type safety
-}
+import { Calendar, Clock } from "lucide-react"
+import { createTutorCheckoutSessionAction } from "@/actions/stripe-actions"
 
 /**
- * TutorPage renders the tutor booking interface for premium users.
- * @param {TutorPageProps} props - Next.js page props (unused params awaited)
- * @returns {JSX.Element} The tutor booking UI or an error message
+ * Renders the tutor booking page with a checkout button.
+ *
+ * @returns {JSX.Element} The tutor page UI
  */
-export default async function TutorPage({ params }: TutorPageProps) {
-  // Await params for type safety (though unused here)
-  await params
-
-  // Authenticate user with Clerk
+export default async function TutorsPage() {
   const { userId } = await auth()
 
-  // Redirect to sign-in if not authenticated
   if (!userId) {
-    return redirect("/login")
-  }
-
-  // Fetch user profile to check membership status
-  const profileResult = await getProfileByUserIdAction(userId)
-  if (!profileResult.isSuccess || !profileResult.data) {
     return (
-      <div className="bg-background flex min-h-screen items-center justify-center">
-        <div className="text-foreground text-center">
-          <h1 className="text-2xl font-semibold">Error</h1>
-          <p className="mt-2">
-            Unable to load your profile. Please try again later.
+      <div className="bg-background min-h-screen py-12">
+        <div className="container mx-auto px-4">
+          <h1 className="text-foreground mb-12 text-center text-4xl font-bold">
+            Live Tutor Sessions
+          </h1>
+          <p className="text-muted-foreground text-center">
+            Please sign in to book a tutor session.
           </p>
         </div>
       </div>
     )
   }
 
-  const profile = profileResult.data
-  const isPremium = profile.membership === "pro"
-
-  // Define checkout session parameters
-  const checkoutParams: CreateTutorCheckoutSessionParams = {
-    userId,
-    successUrl: `${process.env.NEXT_PUBLIC_BASE_URL}/community/tutors/success`,
-    cancelUrl: `${process.env.NEXT_PUBLIC_BASE_URL}/community/tutors`
-  }
-
-  // Function to handle checkout session creation
-  async function getCheckoutUrl(): Promise<string | null> {
-    const result = await createTutorCheckoutSessionAction(checkoutParams)
-    if (result.isSuccess && result.data?.url) {
-      return result.data.url
+  async function handleCheckout() {
+    "use server"
+    if (!userId) {
+      throw new Error("User ID is required for checkout")
     }
-    console.error("Failed to create checkout session:", result.message)
-    return null
-  }
 
-  // Fetch checkout URL server-side
-  const checkoutUrl = await getCheckoutUrl()
+    const result = await createTutorCheckoutSessionAction({ userId })
+    if (result.isSuccess && result.data?.url) {
+      return { redirect: result.data.url }
+    }
+    throw new Error(result.message || "Failed to create checkout session")
+  }
 
   return (
-    <div className="bg-background flex min-h-screen flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md text-center">
-        <h1 className="text-foreground mb-6 text-3xl font-bold">
+    <div className="bg-background min-h-screen py-12">
+      <div className="container mx-auto px-4">
+        <h1 className="text-foreground mb-12 text-center text-4xl font-bold">
           Book a Live Tutor Session
         </h1>
-        <p className="text-muted-foreground mb-8">
-          Connect with a Kannada tutor for personalized learning. Available
-          exclusively for premium members.
-        </p>
 
-        {isPremium ? (
-          checkoutUrl ? (
-            <form action={checkoutUrl} method="POST">
-              <Button
-                type="submit"
-                className="bg-primary text-primary-foreground hover:bg-primary/90 w-full"
-              >
-                Book Now with Stripe
-              </Button>
-            </form>
-          ) : (
-            <div className="text-destructive">
-              Failed to load checkout. Please try again later.
-            </div>
-          )
-        ) : (
-          <div className="text-muted-foreground">
-            <p>
-              This feature is available only to premium members. Upgrade your
-              plan to book a tutor session.
-            </p>
-            <Button
-              variant="outline"
-              className="mt-4"
-              onClick={() => redirect("/pricing")}
-            >
-              Upgrade to Premium
-            </Button>
+        <div className="bg-card mx-auto max-w-md rounded-lg border p-6 shadow-md">
+          <h2 className="text-foreground mb-4 text-2xl font-semibold">
+            One-on-One Tutoring
+          </h2>
+          <p className="text-muted-foreground mb-4">
+            Get personalized help from a Kannada tutor for $20 per session.
+          </p>
+
+          <div className="mb-2 flex items-center">
+            <Calendar className="text-primary mr-2 size-5" />
+            <span className="text-foreground">30-minute session</span>
           </div>
-        )}
+          <div className="mb-6 flex items-center">
+            <Clock className="text-primary mr-2 size-5" />
+            <span className="text-foreground">Schedule after booking</span>
+          </div>
+
+          <form
+            onSubmit={async e => {
+              e.preventDefault()
+              const result = await handleCheckout()
+              if (result && result.redirect) {
+                window.location.href = result.redirect
+              }
+            }}
+            className="w-full"
+          >
+            <button
+              type="submit"
+              className="bg-primary text-primary-foreground hover:bg-primary/90 w-full rounded-md py-2 font-medium"
+            >
+              Book Now - $20
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   )
