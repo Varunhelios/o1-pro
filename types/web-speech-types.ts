@@ -1,19 +1,18 @@
 /**
  * @description
  * This file augments the global TypeScript types for the Web Speech API,
- * providing explicit definitions for SpeechRecognition and related interfaces.
- * It extends the Window interface to include SpeechRecognition and webkitSpeechRecognition
- * constructors, ensuring compatibility with browser implementations and TypeScript type checking.
+ * specifically adding SpeechRecognition and webkitSpeechRecognition to the Window interface.
+ * It relies on native DOM types (SpeechRecognitionEvent, SpeechRecognitionResult, etc.)
+ * from lib.dom.d.ts, ensuring compatibility with browser implementations.
  *
  * Key features:
- * - Defines SpeechRecognition interface matching native DOM properties
  * - Extends Window with constructor types for SpeechRecognition
  *
  * @dependencies
  * - None (pure TypeScript augmentation leveraging lib.dom.d.ts)
  *
  * @notes
- * - Includes minimal properties needed for the app, compatible with native SpeechRecognition
+ * - Avoids redefining SpeechRecognitionEvent or related types to prevent conflicts
  * - Ensures type safety for both standard and webkit-prefixed implementations
  * - Wrapped in an ambient module to comply with TypeScript module scoping rules
  */
@@ -47,7 +46,7 @@ export interface SpeechRecognitionErrorEvent {
 
 /**
  * Constructor type for SpeechRecognition or webkitSpeechRecognition.
- * Compatible with the native SpeechRecognition interface.
+ * Compatible with the native SpeechRecognition interface from lib.dom.d.ts.
  */
 export interface SpeechRecognitionConstructor {
   new (): SpeechRecognition

@@ -16,13 +16,13 @@
  * - @/components/ui/textarea: Shadcn Textarea for displaying transcription
  * - lucide-react: Provides Mic and Send icons for UI
  * - react: Manages component state and effects
+ * - @/types: Imports SpeechRecognitionConstructor for type safety
  *
  * @notes
- * - Requires browser support for Web Speech API (SpeechRecognition); falls back gracefully if unsupported
+ * - Requires browser support for Web Speech API; falls back gracefully if unsupported
  * - Language is set to "kn-IN" (Kannada) for accurate recognition
- * - Submission handler is passed as a prop to allow integration with server actions (e.g., assessPronunciationAction)
- * - Handles edge cases like empty transcripts or API errors with user feedback
- * - No direct server actions are called here per client component rules
+ * - Submission handler is passed as a prop to allow integration with server actions
+ * - Uses native DOM types (SpeechRecognitionEvent, SpeechRecognitionErrorEvent) from lib.dom.d.ts
  */
 
 "use client"
@@ -30,21 +30,18 @@
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Mic, Send } from "lucide-react"
-import { useState, useEffect } from "react"
+import { useState } from "react"
+import { SpeechRecognitionConstructor } from "@/types"
+import {
+  SpeechRecognition,
+  SpeechRecognitionEvent,
+  SpeechRecognitionErrorEvent
+} from "@/types/web-speech-types"
 
 // Define props interface for type safety
 interface PronunciationGuideProps {
   phrase: string // The Kannada phrase to practice
   onSubmit: (transcript: string) => Promise<void> // Handler to process the recorded speech
-}
-
-// Define types for SpeechRecognitionEvent and SpeechRecognitionErrorEvent
-interface SpeechRecognitionEvent {
-  results: SpeechRecognitionResultList
-}
-
-interface SpeechRecognitionErrorEvent {
-  error: string
 }
 
 /**
@@ -56,67 +53,50 @@ export default function PronunciationGuide({
   phrase,
   onSubmit
 }: PronunciationGuideProps) {
-  // State for recording status, transcript, and API support
   const [isRecording, setIsRecording] = useState(false)
   const [transcript, setTranscript] = useState("")
   const [isSupported, setIsSupported] = useState(true)
 
-  // Initialize SpeechRecognition API on mount
-  useEffect(() => {
-    // Check for SpeechRecognition support (falls back to webkit if needed)
-    const SpeechRecognitionAPI =
-      window.SpeechRecognition || window.webkitSpeechRecognition
+  // Initialize SpeechRecognition with type safety
+  const SpeechRecognition: SpeechRecognitionConstructor | undefined =
+    window.SpeechRecognition || window.webkitSpeechRecognition
+  const recognition = SpeechRecognition ? new SpeechRecognition() : null
 
-    if (!SpeechRecognitionAPI) {
-      setIsSupported(false)
-      return
-    }
-
-    // Create and configure the recognition instance
-    const recognition = new SpeechRecognitionAPI()
-    recognition.continuous = false // Stop after one result
-    recognition.interimResults = false // Only final results
+  // Configure recognition if available
+  if (recognition) {
+    recognition.continuous = false
+    recognition.interimResults = false
     recognition.lang = "kn-IN" // Kannada language code
 
-    // Handle successful recognition
+    // Handle transcription result using native DOM type
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const spokenText = event.results[0][0].transcript
-      setTranscript(spokenText)
+      const result = event.results[0][0].transcript
+      setTranscript(result)
       setIsRecording(false)
     }
 
-    // Handle errors (e.g., no speech detected, network issues)
+    // Handle recognition errors using native DOM type
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error("Speech recognition error:", event.error)
       setTranscript(`Error: ${event.error}. Please try again.`)
       setIsRecording(false)
     }
+  } else {
+    setIsSupported(false)
+  }
 
-    // Handle recording toggle
-    const toggleRecording = () => {
-      if (isRecording) {
-        recognition.stop()
-      } else {
-        setTranscript("") // Clear previous transcript
-        recognition.start()
-        setIsRecording(true)
-      }
-    }
+  // Handle recording toggle
+  const toggleRecording = () => {
+    if (!recognition) return
 
-    // Add click handler to the button
-    const recordButton = document.getElementById("record-button")
-    if (recordButton) {
-      recordButton.onclick = toggleRecording
-    }
-
-    // Cleanup to prevent memory leaks
-    return () => {
+    if (isRecording) {
       recognition.stop()
-      if (recordButton) {
-        recordButton.onclick = null
-      }
+    } else {
+      setTranscript("") // Clear previous transcript
+      recognition.start()
+      setIsRecording(true)
     }
-  }, [isRecording]) // Re-run effect when recording state changes
+  }
 
   // Handle submission of the transcript
   const handleSubmit = async () => {
@@ -135,10 +115,10 @@ export default function PronunciationGuide({
       {isSupported ? (
         <>
           <Button
-            id="record-button"
+            onClick={toggleRecording}
+            disabled={!recognition}
             className="w-full"
             variant={isRecording ? "destructive" : "default"}
-            disabled={!isSupported}
           >
             <Mic className="mr-2 size-4" />
             {isRecording ? "Stop Recording" : "Start Recording"}
