@@ -1,115 +1,108 @@
 /**
  * @description
- * This server-side page renders a lesson for a specific level in the Learn Kannada app.
- * It fetches lesson data based on the dynamic [level] route parameter and displays the lesson
- * content, including a pronunciation guide for interactive learning.
+ * This server-side page renders lessons for a specific level in the Learn Kannada app.
+ * It fetches lessons from the database based on the level parameter and displays them using LessonCard components.
+ * Includes an OfflineButton for each lesson to enable offline downloads.
  *
  * Key features:
- * - Dynamic Routing: Handles the [level] parameter as a Promise per Next.js 15
- * - Server-Side Data Fetching: Retrieves lesson data using a server action
- * - Pronunciation Practice: Integrates the PronunciationGuide client component
- * - Loading State: Uses Suspense for asynchronous data fetching
+ * - Dynamic Routing: Displays lessons filtered by level (beginner, intermediate, advanced)
+ * - Data Fetching: Uses server-side fetching with Suspense for loading states
+ * - Offline Support: Integrates OfflineButton for downloading lessons
  *
  * @dependencies
- * - @/actions/db/lessons-actions: Provides getLessonAction for fetching lessons
- * - @/components/learn/pronunciation-guide: Client component for pronunciation practice
- * - react: Provides Suspense for async rendering
- * - @/db/schema/lessons-schema: Imports SelectLesson for type safety
+ * - @/actions/db/lessons-actions: getLessonAction for fetching lessons
+ * - @/components/learn/lesson-card: LessonCard for rendering individual lessons
+ * - @/components/learn/offline-button: OfflineButton for initiating downloads
+ * - @/db/schema/lessons-schema: levelEnum and SelectLesson for type safety
+ * - react: Suspense for async rendering
+ * - next/navigation: notFound for handling invalid levels
  *
  * @notes
- * - Marked "use server" to adhere to server component rules
- * - Params are awaited as a Promise per Next.js 15 dynamic route behavior
- * - No direct client-side logic; data is passed to PronunciationGuide as props
- * - Placeholder onSubmit logs to console; will be replaced in Step 23 with assessPronunciationAction
- * - Handles edge case of lesson not found with a fallback message
+ * - Marked "use server" per frontend rules for server components
+ * - Uses Suspense to handle async data fetching per frontend guidelines
+ * - Validates level param against levelEnum values
+ * - Assumes lessons are stored in the database and accessible via getLessonAction
  */
 
 "use server"
 
-import { Suspense } from "react"
 import { getLessonAction } from "@/actions/db/lessons-actions"
-import PronunciationGuide from "@/components/learn/pronunciation-guide"
-import { SelectLesson } from "@/db/schema/lessons-schema"
+import { LessonCard } from "@/components/learn/lesson-card"
+import OfflineButton from "@/components/learn/offline-button"
+import { levelEnum, SelectLesson } from "@/db/schema/lessons-schema"
+import { Suspense } from "react"
+import { notFound } from "next/navigation"
 
-/**
- * Props interface for the LessonPage component.
- * @interface LessonPageProps
- */
-interface LessonPageProps {
-  params: Promise<{ level: string }> // Dynamic route params as a Promise
+// Define props interface for the page
+interface LearnLevelPageProps {
+  params: Promise<{ level: string }>
 }
 
 /**
- * LessonPage component fetches and renders a lesson for a given level.
- * @param {LessonPageProps} props - The route parameters
- * @returns {JSX.Element} The lesson content with pronunciation guide
+ * LearnLevelPage renders lessons for a given level.
+ * @param {LearnLevelPageProps} props - Dynamic route params
+ * @returns {JSX.Element} Lesson list with download buttons
  */
-export default async function LessonPage({ params }: LessonPageProps) {
-  // Await the params Promise to get the level
+export default async function LearnLevelPage({ params }: LearnLevelPageProps) {
   const { level } = await params
 
+  // Validate level against enum values
+  if (!levelEnum.enumValues.includes(level as any)) {
+    notFound()
+  }
+
   return (
-    <Suspense fallback={<div>Loading lesson...</div>}>
-      <LessonContentFetcher level={level} />
+    <Suspense fallback={<div className="text-center">Loading lessons...</div>}>
+      <LessonList level={level as (typeof levelEnum.enumValues)[number]} />
     </Suspense>
   )
 }
 
 /**
- * LessonContentFetcher fetches lesson data and renders the content.
- * @param {{ level: string }} props - The level to fetch
- * @returns {JSX.Element} The rendered lesson content
+ * LessonList fetches and renders lessons for the specified level.
+ * @param {Object} props - Level to filter lessons
+ * @param {string} props.level - Lesson level (beginner, intermediate, advanced)
+ * @returns {JSX.Element} List of lesson cards with download buttons
  */
-async function LessonContentFetcher({ level }: { level: string }) {
-  // Define valid levels
-  const validLevels = ["beginner", "intermediate", "advanced"] as const
-  type LessonLevel = (typeof validLevels)[number]
+async function LessonList({
+  level
+}: {
+  level: (typeof levelEnum.enumValues)[number]
+}) {
+  const result = await getLessonAction(level)
 
-  // Validate and assert the level type
-  if (!validLevels.includes(level as LessonLevel)) {
+  if (!result.isSuccess || !result.data) {
     return (
-      <div className="text-muted-foreground p-4 text-center">
-        {"Invalid lesson level."}
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-muted-foreground">
+          {result.message || "Failed to load lessons. Please try again."}
+        </p>
       </div>
     )
   }
 
-  // Fetch the lesson data using the server action
-  const { isSuccess, data, message } = await getLessonAction(
-    level as LessonLevel
-  )
-
-  // Handle case where lesson is not found or fetch fails
-  if (!isSuccess || !data || data.length === 0) {
-    return (
-      <div className="text-muted-foreground p-4 text-center">
-        {message || "Lesson not found for this level."}
-      </div>
-    )
-  }
-
-  // Assuming data is an array, select the first lesson
-  const lesson = data[0] // Get the first lesson from the array
-
-  // Type assertion to ensure content has a phrase property
-  const lessonContent = lesson.content as { phrase: string; text: string }
+  const lessons = result.data
 
   return (
-    <div className="container mx-auto p-4">
-      {/* Lesson Title */}
-      <h1 className="mb-4 text-2xl font-bold">{lesson.title}</h1>
+    <div className="bg-background min-h-screen p-4">
+      <h1 className="text-foreground mb-6 text-3xl font-bold capitalize">
+        {level} Lessons
+      </h1>
 
-      {/* Lesson Content */}
-      <div className="mb-6 text-lg">{lessonContent.text}</div>
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {lessons.map((lesson: SelectLesson) => (
+          <div key={lesson.id} className="flex flex-col gap-2">
+            <LessonCard title={lesson.title} level={lesson.level} />
+            <OfflineButton lessonId={lesson.id} />
+          </div>
+        ))}
+      </div>
 
-      {/* Pronunciation Guide */}
-      <PronunciationGuide
-        phrase={lessonContent.phrase || "No phrase available"}
-        onSubmit={async (transcript: string) => {
-          // Placeholder: Log transcript; replace with assessPronunciationAction in Step 23
-          console.log(`User said: ${transcript}`)
-        }}
-      />
+      {lessons.length === 0 && (
+        <p className="text-muted-foreground mt-8 text-center">
+          No lessons available for this level yet.
+        </p>
+      )}
     </div>
   )
 }

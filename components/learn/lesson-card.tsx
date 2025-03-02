@@ -83,3 +83,5 @@ export async function LessonCard({ title, level, progress }: LessonCardProps) {
     </Card>
   )
 }
+
+export default LessonCard

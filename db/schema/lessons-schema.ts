@@ -47,4 +47,12 @@ export const lessonsTable = pgTable("lessons", {
 
 // Type definitions for insert and select operations
 export type InsertLesson = typeof lessonsTable.$inferInsert
-export type SelectLesson = typeof lessonsTable.$inferSelect
+export interface SelectLesson {
+  id: string
+  title: string
+  level: "beginner" | "intermediate" | "advanced"
+  content: unknown // Adjust as necessary
+  createdAt: Date
+  updatedAt: Date
+  progress?: number
+}
