@@ -1,108 +1,137 @@
 /**
  * @description
- * This server-side page renders lessons for a specific level in the Learn Kannada app.
- * It fetches lessons from the database based on the level parameter and displays them using LessonCard components.
- * Includes an OfflineButton for each lesson to enable offline downloads.
+ * This file defines the Learn page for a specific level in the Learn Kannada app.
+ * It fetches lessons for the given level server-side and renders them using LessonCard components,
+ * with offline download functionality.
  *
  * Key features:
- * - Dynamic Routing: Displays lessons filtered by level (beginner, intermediate, advanced)
- * - Data Fetching: Uses server-side fetching with Suspense for loading states
- * - Offline Support: Integrates OfflineButton for downloading lessons
+ * - Dynamic routing: Displays lessons based on the level parameter (beginner, intermediate, advanced)
+ * - Server-side data fetching: Retrieves lessons using getLessonAction
+ * - Suspense: Handles loading states for asynchronous data
+ * - Accessibility: Integrates LessonCard with text-to-speech from Step 31
+ * - Offline support: Includes OfflineButton for downloading lessons
  *
  * @dependencies
- * - @/actions/db/lessons-actions: getLessonAction for fetching lessons
- * - @/components/learn/lesson-card: LessonCard for rendering individual lessons
- * - @/components/learn/offline-button: OfflineButton for initiating downloads
- * - @/db/schema/lessons-schema: levelEnum and SelectLesson for type safety
- * - react: Suspense for async rendering
- * - next/navigation: notFound for handling invalid levels
+ * - @/actions/db/lessons-actions: For fetching lesson data
+ * - @/components/learn/lesson-card: Default export for rendering lesson cards
+ * - @/components/learn/offline-button: For offline lesson downloads
+ * - @/db/schema/lessons-schema: For lesson types and level enum
+ * - react: For Suspense component
  *
  * @notes
- * - Marked "use server" per frontend rules for server components
- * - Uses Suspense to handle async data fetching per frontend guidelines
- * - Validates level param against levelEnum values
- * - Assumes lessons are stored in the database and accessible via getLessonAction
+ * - Marked as "use server" per frontend rules for server components
+ * - Handles invalid levels with a 404 response
+ * - Uses Tailwind for minimalistic, responsive styling
+ * - Assumes lessons are fetched by ID, but filters by level client-side if needed
  */
 
 "use server"
 
 import { getLessonAction } from "@/actions/db/lessons-actions"
-import { LessonCard } from "@/components/learn/lesson-card"
+import LessonCard from "@/components/learn/lesson-card" // Corrected to default import
 import OfflineButton from "@/components/learn/offline-button"
 import { levelEnum, SelectLesson } from "@/db/schema/lessons-schema"
 import { Suspense } from "react"
 import { notFound } from "next/navigation"
 
-// Define props interface for the page
-interface LearnLevelPageProps {
-  params: Promise<{ level: string }>
+/**
+ * Props for the LearnPage component.
+ * Defines the dynamic route parameters.
+ */
+interface LearnPageProps {
+  params: Promise<{ level: string }> // Async params per Next.js App Router
 }
 
 /**
- * LearnLevelPage renders lessons for a given level.
- * @param {LearnLevelPageProps} props - Dynamic route params
- * @returns {JSX.Element} Lesson list with download buttons
+ * LearnPage component.
+ * Fetches and displays lessons for a specific level, with loading states and offline support.
+ *
+ * @param {LearnPageProps} props - The route parameters including the level
+ * @returns {JSX.Element} The rendered page with lesson cards
  */
-export default async function LearnLevelPage({ params }: LearnLevelPageProps) {
-  const { level } = await params
+export default async function LearnPage({ params }: LearnPageProps) {
+  const { level } = await params // Await async params
 
-  // Validate level against enum values
+  // Validate the level against the enum
   if (!levelEnum.enumValues.includes(level as any)) {
-    notFound()
+    notFound() // Return 404 for invalid levels
   }
 
   return (
-    <Suspense fallback={<div className="text-center">Loading lessons...</div>}>
-      <LessonList level={level as (typeof levelEnum.enumValues)[number]} />
+    <Suspense fallback={<LoadingSkeleton />}>
+      <LessonsFetcher
+        level={level as "beginner" | "intermediate" | "advanced"}
+      />
     </Suspense>
   )
 }
 
 /**
- * LessonList fetches and renders lessons for the specified level.
- * @param {Object} props - Level to filter lessons
- * @param {string} props.level - Lesson level (beginner, intermediate, advanced)
- * @returns {JSX.Element} List of lesson cards with download buttons
+ * LessonsFetcher component.
+ * Fetches lessons server-side and renders them as LessonCard components.
+ *
+ * @param {Object} props - Props containing the level to fetch
+ * @param {"beginner" | "intermediate" | "advanced"} props.level - The lesson level
+ * @returns {JSX.Element} The rendered lesson list
  */
-async function LessonList({
+async function LessonsFetcher({
   level
 }: {
-  level: (typeof levelEnum.enumValues)[number]
+  level: "beginner" | "intermediate" | "advanced"
 }) {
-  const result = await getLessonAction(level)
+  // Fetch lessons (assuming getLessonAction can filter by level; adjust if needed)
+  const { isSuccess, data, message } = await getLessonAction(level)
 
-  if (!result.isSuccess || !result.data) {
+  if (!isSuccess || !data || data.length === 0) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="container mx-auto py-8">
         <p className="text-muted-foreground">
-          {result.message || "Failed to load lessons. Please try again."}
+          {message || "No lessons found for this level."}
         </p>
       </div>
     )
   }
 
-  const lessons = result.data
+  // Filter lessons by level (if getLessonAction doesn’t already)
+  const lessons = data.filter((lesson: SelectLesson) => lesson.level === level)
 
   return (
-    <div className="bg-background min-h-screen p-4">
-      <h1 className="text-foreground mb-6 text-3xl font-bold capitalize">
-        {level} Lessons
-      </h1>
+    <div className="container mx-auto py-8">
+      <h1 className="mb-6 text-3xl font-bold capitalize">{level} Lessons</h1>
 
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {lessons.map((lesson: SelectLesson) => (
-          <div key={lesson.id} className="flex flex-col gap-2">
-            <LessonCard title={lesson.title} level={lesson.level} />
-            <OfflineButton lessonId={lesson.id} />
+          <div key={lesson.id} className="flex flex-col">
+            <LessonCard lesson={lesson} />
+
+            <div className="mt-2">
+              <OfflineButton lessonId={lesson.id} />
+            </div>
           </div>
         ))}
       </div>
+    </div>
+  )
+}
 
-      {lessons.length === 0 && (
-        <p className="text-muted-foreground mt-8 text-center">
-          No lessons available for this level yet.
-        </p>
-      )}
+/**
+ * LoadingSkeleton component.
+ * Displays a placeholder UI while lessons are being fetched.
+ *
+ * @returns {JSX.Element} The loading skeleton
+ */
+function LoadingSkeleton() {
+  return (
+    <div className="container mx-auto py-8">
+      <h1 className="mb-6 text-3xl font-bold">Loading...</h1>
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {[...Array(3)].map((_, index) => (
+          <div
+            key={index}
+            className="bg-muted h-32 animate-pulse rounded-lg"
+          ></div>
+        ))}
+      </div>
     </div>
   )
 }
