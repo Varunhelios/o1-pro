@@ -80,7 +80,10 @@ app/(marketing)/pricing/page.tsx
 app/api/stripe/webhooks/route.ts
 app/community/chat/page.tsx
 app/components/learn/lesson-card.tsx
+app/components/learn/LessonCardWrapper.tsx
+app/components/learn/pronunciation-guide.tsx
 app/dashboard/page.tsx
+app/db/schema/lessons-schema.ts
 app/globals.css
 app/layout.tsx
 app/learn/[level]/page.tsx
@@ -92,6 +95,7 @@ components/landing/footer.tsx
 components/landing/header.tsx
 components/landing/hero.tsx
 components/learn/lesson-card.tsx
+components/learn/pronunciation-guide.tsx
 components/magicui/animated-gradient-text.tsx
 components/magicui/hero-video-dialog.tsx
 components/practice/chatbot.tsx
@@ -3673,26 +3677,228 @@ export default function ChatPage() {
 ================
 File: app/components/learn/lesson-card.tsx
 ================
-import React from "react"
+"use client"
 
-// Define the props type for LessonCard
-export interface LessonCardProps {
-  lesson: {
-    id: string
-    createdAt: Date
-    updatedAt: Date
-    level: "beginner" | "intermediate" | "advanced"
-    title: string
-    content: unknown
-  }
+import { SelectLesson } from "@/db/schema/lessons-schema"
+
+interface LessonCardProps {
+  lesson: SelectLesson
 }
 
-// LessonCard component definition
-export const LessonCard: React.FC<LessonCardProps> = ({ lesson }) => {
+const LessonCard: React.FC<LessonCardProps> = ({ lesson }) => {
   return (
-    <div>
-      <h2>{lesson.title}</h2>
-      {/* Render other lesson details */}
+    <div className="rounded-lg bg-white p-4 shadow-md">
+      <h2 className="text-xl font-bold">{lesson.title}</h2>
+      <p className="capitalize text-gray-600">Level: {lesson.level}</p>
+    </div>
+  )
+}
+
+export default LessonCard
+
+================
+File: app/components/learn/LessonCardWrapper.tsx
+================
+"use client"
+
+import { SelectLesson } from "@/db/schema/lessons-schema"
+
+interface LessonCardProps {
+  lesson: SelectLesson
+}
+
+const LessonCard: React.FC<LessonCardProps> = ({ lesson }) => {
+  return (
+    <div className="rounded-lg bg-white p-4 shadow-md">
+      <h2 className="text-xl font-bold">{lesson.title}</h2>
+      <p className="capitalize text-gray-600">Level: {lesson.level}</p>
+    </div>
+  )
+}
+
+export default LessonCard
+
+================
+File: app/components/learn/pronunciation-guide.tsx
+================
+/**
+ * @description
+ * This client-side component provides a pronunciation guide for the Learn Kannada app.
+ * It uses the Web Speech API to record and transcribe user pronunciation of Kannada phrases,
+ * supporting the interactive pronunciation guides feature. Designed for use in lesson pages
+ * (e.g., /learn/[level]/page.tsx) to enhance learning modules.
+ *
+ * Key features:
+ * - Speech Recording: Toggles recording of user speech with start/stop functionality
+ * - Transcription Display: Shows the transcribed text in a readonly textarea
+ * - Browser Compatibility: Handles lack of Web Speech API support gracefully
+ * - Responsive UI: Built with Tailwind CSS and Shadcn components for a clean, mobile-friendly design
+ *
+ * @dependencies
+ * - @/components/ui/button: Shadcn Button for recording and submission controls
+ * - @/components/ui/textarea: Shadcn Textarea for displaying transcription
+ * - lucide-react: Provides Mic and Send icons for UI enhancement
+ * - react: Manages state and effects for recording and transcription
+ *
+ * @notes
+ * - Uses 'kn-IN' language code for Kannada; assumes browser support for this locale
+ * - Submits transcript via onSubmit prop for assessment in Step 23
+ * - Handles edge cases: unsupported browsers, recognition errors, empty transcripts
+ * - No direct assessment here; focuses on recording and transcription
+ * - Adheres to client component rules: no server actions called directly
+ */
+
+"use client"
+
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { Mic, Send } from "lucide-react"
+import { useState, useEffect } from "react"
+
+// Add these type declarations at the top of the file
+interface SpeechRecognition {
+  new (): SpeechRecognition
+  start(): void
+  stop(): void
+  onresult: (event: SpeechRecognitionEvent) => void
+  onerror: (event: SpeechRecognitionErrorEvent) => void
+  onend: () => void
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+}
+
+interface SpeechRecognitionEvent {
+  results: SpeechRecognitionResultList
+}
+
+interface SpeechRecognitionErrorEvent {
+  error: string
+}
+
+// Define props interface for the component
+interface PronunciationGuideProps {
+  phrase: string // The Kannada phrase to pronounce
+  onSubmit: (transcript: string) => Promise<void> // Callback to handle the transcribed speech
+}
+
+/**
+ * PronunciationGuide component enables users to practice Kannada pronunciation.
+ * @param {PronunciationGuideProps} props - Phrase to pronounce and submission handler
+ * @returns {JSX.Element} UI for recording and submitting speech
+ */
+export default function PronunciationGuide({
+  phrase,
+  onSubmit
+}: PronunciationGuideProps) {
+  const [isRecording, setIsRecording] = useState(false) // Tracks recording state
+  const [transcript, setTranscript] = useState("") // Stores transcribed speech
+  const [isSupported, setIsSupported] = useState(true) // Tracks Web Speech API support
+  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null) // SpeechRecognition instance
+
+  // Initialize SpeechRecognition on component mount
+  useEffect(() => {
+    // Check for SpeechRecognition support (standard or webkit prefix)
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition
+
+    if (!SpeechRecognition) {
+      setIsSupported(false)
+      return
+    }
+
+    // Instantiate and configure SpeechRecognition
+    const recog = new SpeechRecognition()
+    recog.continuous = false // Single result, not continuous
+    recog.interimResults = false // Final results only
+    recog.lang = "kn-IN" // Kannada language code
+
+    // Handle transcription result
+    recog.onresult = (event: SpeechRecognitionEvent) => {
+      const result = event.results[0][0].transcript
+      setTranscript(result)
+      setIsRecording(false)
+    }
+
+    // Handle recognition errors
+    recog.onerror = (event: SpeechRecognitionErrorEvent) => {
+      console.error("Speech recognition error:", event.error)
+      setTranscript(`Error: ${event.error}. Please try again.`)
+      setIsRecording(false)
+    }
+
+    // Ensure recording stops cleanly
+    recog.onend = () => setIsRecording(false)
+
+    setRecognition(recog)
+
+    // Cleanup on unmount
+    return () => {
+      if (recog) recog.stop()
+    }
+  }, []) // Empty dependency array: runs once on mount
+
+  // Toggle recording state
+  const toggleRecording = () => {
+    if (!recognition) return
+
+    if (isRecording) {
+      recognition.stop()
+    } else {
+      setTranscript("") // Clear previous transcript
+      recognition.start()
+      setIsRecording(true)
+    }
+  }
+
+  // Submit the transcript
+  const handleSubmit = async () => {
+    if (!transcript.trim() || isRecording) return // Prevent submission if empty or recording
+    await onSubmit(transcript)
+    setTranscript("") // Reset after submission
+  }
+
+  return (
+    <div className="bg-background w-full max-w-md space-y-4 rounded-lg border p-4">
+      {/* Phrase to pronounce */}
+      <div className="text-foreground text-lg font-medium">{phrase}</div>
+
+      {/* Recording UI */}
+      {isSupported ? (
+        <>
+          <Button
+            onClick={toggleRecording}
+            disabled={!recognition}
+            variant={isRecording ? "destructive" : "default"}
+            className="w-full"
+          >
+            <Mic className="mr-2 size-4" />
+            {isRecording ? "Stop Recording" : "Start Recording"}
+          </Button>
+
+          <Textarea
+            value={transcript}
+            onChange={e => setTranscript(e.target.value)} // Allow manual edits
+            placeholder="Your pronunciation will appear here..."
+            className="h-24 resize-none"
+            readOnly={isRecording} // Prevent edits during recording
+          />
+
+          <Button
+            onClick={handleSubmit}
+            disabled={!transcript.trim() || isRecording}
+            className="w-full"
+          >
+            <Send className="mr-2 size-4" />
+            Submit Pronunciation
+          </Button>
+        </>
+      ) : (
+        <div className="text-muted-foreground text-center">
+          Speech recognition is not supported in your browser. Please use a
+          modern browser like Chrome or Edge.
+        </div>
+      )}
     </div>
   )
 }
@@ -3857,6 +4063,18 @@ function LoadingFallback() {
       <div className="text-muted-foreground">Loading your dashboard...</div>
     </div>
   )
+}
+
+================
+File: app/db/schema/lessons-schema.ts
+================
+export interface SelectLesson {
+  id: string
+  level: "beginner" | "intermediate" | "advanced"
+  title: string
+  content: unknown // Adjust this type as necessary
+  createdAt: Date
+  updatedAt: Date
 }
 
 ================
@@ -4026,148 +4244,117 @@ File: app/learn/[level]/page.tsx
 ================
 /**
  * @description
- * This server-side page renders the learning interface for the Learn Kannada app.
- * It displays lessons for a specific level (beginner, intermediate, advanced) and adjusts
- * the level dynamically based on user progress using AI recommendations.
+ * This server-side page renders a lesson for a specific level in the Learn Kannada app.
+ * It fetches lesson data based on the dynamic [level] route parameter and displays the lesson
+ * content, including a pronunciation guide for interactive learning.
  *
  * Key features:
- * - Dynamic routing: Handles lesson level via [level] parameter
- * - Server-side data fetching: Retrieves lessons and adjusts difficulty
- * - Suspense: Provides loading states during async operations
- * - AI-driven adjustment: Redirects to recommended level if progress suggests a mismatch
- * - Responsive UI: Uses Tailwind CSS for a clean, minimalistic design
+ * - Dynamic Routing: Handles the [level] parameter as a Promise per Next.js 15
+ * - Server-Side Data Fetching: Retrieves lesson data using a server action
+ * - Pronunciation Practice: Integrates the PronunciationGuide client component
+ * - Loading State: Uses Suspense for asynchronous data fetching
  *
  * @dependencies
- * - @/actions/db/lessons-actions: Fetches lessons by level
- * - @/actions/ai-actions: Adjusts lesson difficulty based on progress
- * - @/components/learn/lesson-card: Reusable component for lesson display
- * - @clerk/nextjs/server: Clerk auth for user identification
- * - react: Suspense for async handling
- * - next/navigation: Redirects for level adjustment
+ * - @/actions/db/lessons-actions: Provides getLessonAction for fetching lessons
+ * - @/components/learn/pronunciation-guide: Client component for pronunciation practice
+ * - react: Provides Suspense for async rendering
+ * - @/db/schema/lessons-schema: Imports SelectLesson for type safety
  *
  * @notes
- * - Requires user authentication via Clerk; redirects to login if unauthenticated
- * - Fetches all lessons for the requested level unless adjusted by AI
- * - Skeleton fallback enhances UX during data loading
- * - Edge case: If no lessons exist for a level, displays a message
- * - Progress is set to 0 as a placeholder; actual progress integration pending (e.g., Step 24)
+ * - Marked "use server" to adhere to server component rules
+ * - Params are awaited as a Promise per Next.js 15 dynamic route behavior
+ * - No direct client-side logic; data is passed to PronunciationGuide as props
+ * - Placeholder onSubmit logs to console; will be replaced in Step 23 with assessPronunciationAction
+ * - Handles edge case of lesson not found with a fallback message
  */
 
 "use server"
 
-import { getLessonsByLevelAction } from "@/actions/db/lessons-actions"
-import { adjustLessonDifficultyAction } from "@/actions/ai-actions"
-import { LessonCard } from "@/components/learn/lesson-card"
-import { auth } from "@clerk/nextjs/server"
-import { redirect } from "next/navigation"
 import { Suspense } from "react"
+import { getLessonAction } from "@/actions/db/lessons-actions"
+import PronunciationGuide from "@/components/learn/pronunciation-guide"
+import { SelectLesson } from "@/db/schema/lessons-schema"
 
-// Skeleton component for loading state
-async function LearnSkeleton() {
-  return (
-    <div className="w-full max-w-4xl p-4">
-      <div className="mb-6 h-8 w-1/2 animate-pulse rounded bg-gray-200" />
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, index) => (
-          <div
-            key={index}
-            className="h-40 w-full animate-pulse rounded bg-gray-200"
-          />
-        ))}
-      </div>
-    </div>
-  )
+/**
+ * Props interface for the LessonPage component.
+ * @interface LessonPageProps
+ */
+interface LessonPageProps {
+  params: Promise<{ level: string }> // Dynamic route params as a Promise
 }
 
-// Fetcher component to handle async data retrieval and level adjustment
-async function LessonsFetcher({ level }: { level: string }) {
-  // Validate level parameter
-  const validLevels = ["beginner", "intermediate", "advanced"]
-  if (!validLevels.includes(level)) {
-    redirect("/learn/beginner") // Default redirect for invalid levels
-  }
+/**
+ * LessonPage component fetches and renders a lesson for a given level.
+ * @param {LessonPageProps} props - The route parameters
+ * @returns {JSX.Element} The lesson content with pronunciation guide
+ */
+export default async function LessonPage({ params }: LessonPageProps) {
+  // Await the params Promise to get the level
+  const { level } = await params
 
-  // Get authenticated user ID from Clerk
-  const { userId } = await auth()
-  if (!userId) {
-    redirect("/login") // Redirect to login if user is not authenticated
-  }
-
-  // Adjust lesson difficulty based on user progress
-  const adjustmentResult = await adjustLessonDifficultyAction(userId)
-  if (adjustmentResult.isSuccess && adjustmentResult.data !== level) {
-    // Redirect to the recommended level if it differs from the requested one
-    redirect(`/learn/${adjustmentResult.data}`)
-  }
-  if (!adjustmentResult.isSuccess) {
-    console.error(
-      "Failed to adjust lesson difficulty:",
-      adjustmentResult.message
-    )
-    // Proceed with requested level as fallback
-  }
-
-  // Fetch lessons for the requested level
-  const { isSuccess, data, message } = await getLessonsByLevelAction(
-    level as "beginner" | "intermediate" | "advanced"
-  )
-  if (!isSuccess || !data) {
-    console.error(`Failed to fetch lessons: ${message}`)
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-muted-foreground">
-          Failed to load lessons. Please try again later.
-        </div>
-      </div>
-    )
-  }
-
-  // Render lessons if available
   return (
-    <div className="bg-background flex min-h-screen items-center justify-center">
-      <div className="w-full max-w-4xl p-4">
-        <h1 className="text-foreground mb-6 text-2xl font-semibold capitalize">
-          {level} Lessons
-        </h1>
-
-        {data.length > 0 ? (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {data.map(lesson => (
-              <LessonCard
-                key={lesson.id}
-                title={lesson.title}
-                level={lesson.level}
-                progress={0} // Placeholder; actual progress to be integrated later
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="text-muted-foreground">
-            No lessons available for this level yet.
-          </div>
-        )}
-      </div>
-    </div>
+    <Suspense fallback={<div>Loading lesson...</div>}>
+      <LessonContentFetcher level={level} />
+    </Suspense>
   )
 }
 
 /**
- * LearnPage renders the lesson interface for a specific level with AI-driven adjustment.
- * @param {Promise<{ level: string }>} params - Dynamic route params with lesson level
- * @returns {JSX.Element} The lessons UI with Suspense boundary
+ * LessonContentFetcher fetches lesson data and renders the content.
+ * @param {{ level: string }} props - The level to fetch
+ * @returns {JSX.Element} The rendered lesson content
  */
-export default async function LearnPage({
-  params
-}: {
-  params: Promise<{ level: string }>
-}) {
-  // Await dynamic params
-  const { level } = await params
+async function LessonContentFetcher({ level }: { level: string }) {
+  // Define valid levels
+  const validLevels = ["beginner", "intermediate", "advanced"] as const
+  type LessonLevel = (typeof validLevels)[number]
+
+  // Validate and assert the level type
+  if (!validLevels.includes(level as LessonLevel)) {
+    return (
+      <div className="text-muted-foreground p-4 text-center">
+        {"Invalid lesson level."}
+      </div>
+    )
+  }
+
+  // Fetch the lesson data using the server action
+  const { isSuccess, data, message } = await getLessonAction(
+    level as LessonLevel
+  )
+
+  // Handle case where lesson is not found or fetch fails
+  if (!isSuccess || !data || data.length === 0) {
+    return (
+      <div className="text-muted-foreground p-4 text-center">
+        {message || "Lesson not found for this level."}
+      </div>
+    )
+  }
+
+  // Assuming data is an array, select the first lesson
+  const lesson = data[0] // Get the first lesson from the array
+
+  // Type assertion to ensure content has a phrase property
+  const lessonContent = lesson.content as { phrase: string; text: string }
 
   return (
-    <Suspense fallback={<LearnSkeleton />}>
-      <LessonsFetcher level={level} />
-    </Suspense>
+    <div className="container mx-auto p-4">
+      {/* Lesson Title */}
+      <h1 className="mb-4 text-2xl font-bold">{lesson.title}</h1>
+
+      {/* Lesson Content */}
+      <div className="mb-6 text-lg">{lessonContent.text}</div>
+
+      {/* Pronunciation Guide */}
+      <PronunciationGuide
+        phrase={lessonContent.phrase || "No phrase available"}
+        onSubmit={async (transcript: string) => {
+          // Placeholder: Log transcript; replace with assessPronunciationAction in Step 23
+          console.log(`User said: ${transcript}`)
+        }}
+      />
+    </div>
   )
 }
 
@@ -5004,6 +5191,182 @@ export async function LessonCard({ title, level, progress }: LessonCardProps) {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+================
+File: components/learn/pronunciation-guide.tsx
+================
+/**
+ * @description
+ * This client-side component provides a pronunciation guide for the Learn Kannada app.
+ * It allows users to practice speaking Kannada phrases by recording their speech using
+ * the Web Speech API and displaying the transcribed result. Designed for use in lesson
+ * pages to support interactive pronunciation learning.
+ *
+ * Key features:
+ * - Phrase Display: Shows the Kannada phrase to practice
+ * - Speech Recording: Uses Web Speech API to record and transcribe user speech
+ * - Responsive UI: Clean, minimalistic design with Tailwind CSS and Shadcn components
+ * - Error Handling: Handles unsupported browsers and recognition errors gracefully
+ *
+ * @dependencies
+ * - @/components/ui/button: Shadcn Button for record/stop controls
+ * - @/components/ui/textarea: Shadcn Textarea for displaying transcription
+ * - lucide-react: Provides Mic and Send icons for UI
+ * - react: Manages component state and effects
+ *
+ * @notes
+ * - Requires browser support for Web Speech API (SpeechRecognition); falls back gracefully if unsupported
+ * - Language is set to "kn-IN" (Kannada) for accurate recognition
+ * - Submission handler is passed as a prop to allow integration with server actions (e.g., assessPronunciationAction)
+ * - Handles edge cases like empty transcripts or API errors with user feedback
+ * - No direct server actions are called here per client component rules
+ */
+
+"use client"
+
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { Mic, Send } from "lucide-react"
+import { useState, useEffect } from "react"
+
+// Define props interface for type safety
+interface PronunciationGuideProps {
+  phrase: string // The Kannada phrase to practice
+  onSubmit: (transcript: string) => Promise<void> // Handler to process the recorded speech
+}
+
+// Define types for SpeechRecognitionEvent and SpeechRecognitionErrorEvent
+interface SpeechRecognitionEvent {
+  results: SpeechRecognitionResultList
+}
+
+interface SpeechRecognitionErrorEvent {
+  error: string
+}
+
+/**
+ * PronunciationGuide component renders a UI for practicing pronunciation.
+ * @param {PronunciationGuideProps} props - Phrase to practice and submission handler
+ * @returns {JSX.Element} A UI with recording controls and transcript display
+ */
+export default function PronunciationGuide({
+  phrase,
+  onSubmit
+}: PronunciationGuideProps) {
+  // State for recording status, transcript, and API support
+  const [isRecording, setIsRecording] = useState(false)
+  const [transcript, setTranscript] = useState("")
+  const [isSupported, setIsSupported] = useState(true)
+
+  // Initialize SpeechRecognition API on mount
+  useEffect(() => {
+    // Check for SpeechRecognition support (falls back to webkit if needed)
+    const SpeechRecognitionAPI =
+      window.SpeechRecognition || window.webkitSpeechRecognition
+
+    if (!SpeechRecognitionAPI) {
+      setIsSupported(false)
+      return
+    }
+
+    // Create and configure the recognition instance
+    const recognition = new SpeechRecognitionAPI()
+    recognition.continuous = false // Stop after one result
+    recognition.interimResults = false // Only final results
+    recognition.lang = "kn-IN" // Kannada language code
+
+    // Handle successful recognition
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const spokenText = event.results[0][0].transcript
+      setTranscript(spokenText)
+      setIsRecording(false)
+    }
+
+    // Handle errors (e.g., no speech detected, network issues)
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      console.error("Speech recognition error:", event.error)
+      setTranscript(`Error: ${event.error}. Please try again.`)
+      setIsRecording(false)
+    }
+
+    // Handle recording toggle
+    const toggleRecording = () => {
+      if (isRecording) {
+        recognition.stop()
+      } else {
+        setTranscript("") // Clear previous transcript
+        recognition.start()
+        setIsRecording(true)
+      }
+    }
+
+    // Add click handler to the button
+    const recordButton = document.getElementById("record-button")
+    if (recordButton) {
+      recordButton.onclick = toggleRecording
+    }
+
+    // Cleanup to prevent memory leaks
+    return () => {
+      recognition.stop()
+      if (recordButton) {
+        recordButton.onclick = null
+      }
+    }
+  }, [isRecording]) // Re-run effect when recording state changes
+
+  // Handle submission of the transcript
+  const handleSubmit = async () => {
+    if (transcript.trim()) {
+      await onSubmit(transcript)
+      setTranscript("") // Reset after successful submission
+    }
+  }
+
+  return (
+    <div className="w-full max-w-lg space-y-6 p-4">
+      {/* Display the phrase to practice */}
+      <div className="text-foreground text-lg font-medium">{phrase}</div>
+
+      {/* Recording controls and transcript display */}
+      {isSupported ? (
+        <>
+          <Button
+            id="record-button"
+            className="w-full"
+            variant={isRecording ? "destructive" : "default"}
+            disabled={!isSupported}
+          >
+            <Mic className="mr-2 size-4" />
+            {isRecording ? "Stop Recording" : "Start Recording"}
+          </Button>
+
+          <Textarea
+            value={transcript}
+            onChange={e => setTranscript(e.target.value)} // Allow manual edits
+            placeholder="Your speech will appear here..."
+            className="h-32 resize-none"
+            readOnly={isRecording} // Prevent edits during recording
+          />
+
+          <Button
+            onClick={handleSubmit}
+            disabled={!transcript.trim() || isRecording}
+            className="w-full"
+          >
+            <Send className="mr-2 size-4" />
+            Submit Speech
+          </Button>
+        </>
+      ) : (
+        <div className="text-muted-foreground text-center">
+          Speech recognition is not supported in your browser. Please use a
+          modern browser like Chrome or Firefox.
+        </div>
+      )}
+    </div>
   )
 }
 

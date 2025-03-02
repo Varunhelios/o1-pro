@@ -1,91 +1,81 @@
 /**
  * @description
  * This client-side component renders a speaking exercise UI for the Learn Kannada app.
- * It uses the Web Speech API to record and transcribe user speech for pronunciation practice.
- * Designed for use in /practice/[type]/page.tsx to support interactive learning.
+ * It allows users to record their speech, transcribe it using the Web Speech API,
+ * and receive AI-generated pronunciation feedback. Designed for use in /practice/[type]/page.tsx.
  *
  * Key features:
- * - Displays a phrase for the user to speak
- * - Records and transcribes speech using Web Speech API
- * - Clean, responsive UI with Tailwind CSS and Shadcn components
- * - Submits transcript to a provided handler function
+ * - Speech Recording: Uses Web Speech API to capture and transcribe user speech
+ * - Pronunciation Feedback: Submits transcript to AI server action for evaluation
+ * - Responsive UI: Clean design with Tailwind CSS and Shadcn components
+ * - Error Handling: Manages unsupported browsers and API errors
  *
  * @dependencies
  * - @/components/ui/button: Shadcn Button for recording and submission
  * - @/components/ui/textarea: Shadcn Textarea for transcript display
- * - @/db/schema/exercises-schema: Imports SelectExercise for type safety
- * - lucide-react: Provides icons (e.g., Mic, Send)
+ * - @/actions/ai-actions: Imports assessPronunciationAction for feedback
+ * - lucide-react: Provides Mic and Send icons
+ * - react: Manages state and effects
  *
  * @notes
- * - Requires browser support for Web Speech API (SpeechRecognition)
- * - Fallback message if API is unavailable
- * - Assumes content JSON has a phrase string
- * - Submission handler is expected to call a server action (e.g., assessPronunciationAction)
- * - Handles edge cases like API unavailability and empty transcripts
+ * - Requires browser support for Web Speech API; falls back if unsupported
+ * - Language set to "kn-IN" (Kannada) for accurate recognition
+ * - No direct server actions are called here; submission is async via props
+ * - Handles edge cases like empty transcripts or API failures with user feedback
  */
 
 "use client"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { SelectExercise } from "@/db/schema/exercises-schema"
+import { assessPronunciationAction } from "@/actions/ai-actions"
 import { Mic, Send } from "lucide-react"
 import { useState } from "react"
+import {
+  SpeechRecognition,
+  SpeechRecognitionEvent,
+  SpeechRecognitionResultList
+} from "@/types/web-speech-types"
 
-// Add this interface declaration at the top of the file
-declare global {
-  interface Window {
-    SpeechRecognition: any
-    webkitSpeechRecognition: any
-  }
+// Extend the Window interface to include SpeechRecognition
+interface Window {
+  SpeechRecognition: typeof window.SpeechRecognition
+  webkitSpeechRecognition: typeof window.webkitSpeechRecognition
 }
 
-// Declare SpeechRecognition type (not included in TS by default)
-interface SpeechRecognition extends EventTarget {
-  continuous: boolean
-  interimResults: boolean
-  lang: string
-  start: () => void
-  stop: () => void
-  onresult: (event: SpeechRecognitionEvent) => void
-  onerror: (event: SpeechRecognitionErrorEvent) => void
+// Define the type for SpeechRecognition constructor
+type SpeechRecognitionConstructor = new () => SpeechRecognition
+
+// Define props interface for type safety
+interface SpeakingExerciseProps {
+  exercise: {
+    id: string
+    content: { phrase: string } // Expected phrase from exercise content
+  } // Exercise data from database
 }
 
-interface SpeechRecognitionEvent {
-  results: SpeechRecognitionResultList
-}
-
-interface SpeechRecognitionErrorEvent extends Event {
+// Define types for SpeechRecognitionEvent and SpeechRecognitionErrorEvent
+interface SpeechRecognitionErrorEvent {
   error: string
 }
 
-// Define props interface
-interface SpeakingExerciseProps {
-  exercise: SelectExercise // Exercise data from database
-  onSubmit: (transcript: string) => Promise<void> // Handler to process submission
-}
-
 /**
- * SpeakingExercise component renders a speaking exercise UI.
- * @param {SpeakingExerciseProps} props - Exercise data and submission handler
- * @returns {JSX.Element} A UI with phrase, recording controls, and transcript
+ * SpeakingExercise component renders a UI for speaking practice with feedback.
+ * @param {SpeakingExerciseProps} props - Exercise data including the expected phrase
+ * @returns {JSX.Element} A UI with recording controls, transcript, and feedback
  */
-export default function SpeakingExercise({
-  exercise,
-  onSubmit
-}: SpeakingExerciseProps) {
-  // Parse exercise content (assuming JSON structure: { phrase: string })
-  const content = exercise.content as { phrase: string }
-  const phrase = content?.phrase ?? "No phrase available"
-
-  // State for recording and transcript
+export default function SpeakingExercise({ exercise }: SpeakingExerciseProps) {
   const [isRecording, setIsRecording] = useState(false)
   const [transcript, setTranscript] = useState("")
+  const [feedback, setFeedback] = useState("")
   const [isSupported, setIsSupported] = useState(true)
+
+  // Extract phrase from exercise content
+  const phrase = exercise.content.phrase || "No phrase available"
 
   // Initialize SpeechRecognition
   const SpeechRecognition = (window.SpeechRecognition ||
-    window.webkitSpeechRecognition) as (new () => SpeechRecognition) | undefined
+    window.webkitSpeechRecognition) as SpeechRecognitionConstructor | undefined
   const recognition = SpeechRecognition ? new SpeechRecognition() : null
 
   // Configure recognition if available
@@ -117,16 +107,28 @@ export default function SpeakingExercise({
       recognition.stop()
     } else {
       setTranscript("")
+      setFeedback("") // Clear previous feedback
       recognition.start()
       setIsRecording(true)
     }
   }
 
-  // Handle submission
+  // Handle submission to get pronunciation feedback
   const handleSubmit = async () => {
-    if (transcript.trim()) {
-      await onSubmit(transcript)
-      setTranscript("") // Reset after submission
+    if (!transcript.trim()) {
+      setFeedback("Please record something to submit.")
+      return
+    }
+
+    const { isSuccess, data, message } = await assessPronunciationAction(
+      transcript,
+      phrase
+    )
+
+    if (isSuccess) {
+      setFeedback(data)
+    } else {
+      setFeedback(message || "Failed to get feedback. Please try again.")
     }
   }
 
@@ -166,6 +168,13 @@ export default function SpeakingExercise({
             <Send className="mr-2 size-4" />
             Submit Speech
           </Button>
+
+          {/* Feedback display */}
+          {feedback && (
+            <div className="text-foreground bg-muted rounded-md p-4">
+              <strong>Feedback:</strong> {feedback}
+            </div>
+          )}
         </>
       ) : (
         <div className="text-muted-foreground">
