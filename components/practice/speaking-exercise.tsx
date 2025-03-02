@@ -53,6 +53,7 @@ interface SpeakingExerciseProps {
     id: string
     content: { phrase: string } // Expected phrase from exercise content
   } // Exercise data from database
+  onSubmit: (response: string) => Promise<void>
 }
 
 /**
