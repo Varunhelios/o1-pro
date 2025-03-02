@@ -1,157 +1,180 @@
-/*
-This server page displays pricing options for the product, integrating Stripe payment links.
-*/
+/**
+ * @description
+ * This file defines the pricing page for the Learn Kannada app, showcasing the freemium model.
+ * It displays pricing tiers (free and premium) and integrates with Stripe for subscription purchases.
+ *
+ * Key features:
+ * - Pricing Tiers: Displays free and premium plans with features and pricing
+ * - Stripe Integration: Redirects to Stripe checkout for premium subscriptions
+ * - Authentication Check: Personalizes the call-to-action based on user login status
+ *
+ * @dependencies
+ * - @clerk/nextjs/server: Provides auth() for authentication status
+ * - lucide-react: Provides icons for visual enhancement
+ * - next/navigation: Provides notFound for handling invalid routes
+ * - @/lib/stripe: Provides the Stripe client for checkout
+ *
+ * @notes
+ * - This is a server component, marked with "use server"
+ * - Pricing is hardcoded for simplicity; in production, fetch from Stripe products
+ * - Assumes Stripe products are set up manually by the user per instructions
+ * - Uses Tailwind for responsive, minimalistic design per design requests
+ */
 
 "use server"
 
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card"
-import { cn } from "@/lib/utils"
 import { auth } from "@clerk/nextjs/server"
-import { Check } from "lucide-react"
+import { Check, X } from "lucide-react"
+import { notFound } from "next/navigation"
+import { stripe } from "@/lib/stripe"
 
+/**
+ * Pricing tier interface for type safety.
+ */
+interface PricingTier {
+  name: string
+  price: string
+  description: string
+  features: string[]
+  isPremium: boolean
+}
+
+// Define pricing tiers
+const pricingTiers: PricingTier[] = [
+  {
+    name: "Free",
+    price: "$0",
+    description: "Basic lessons to get started",
+    features: [
+      "Access to beginner lessons",
+      "Basic exercises",
+      "Community chat"
+    ],
+    isPremium: false
+  },
+  {
+    name: "Premium",
+    price: "$9.99/month",
+    description: "Full access to advanced features",
+    features: [
+      "All beginner, intermediate, and advanced lessons",
+      "Premium exercises with AI feedback",
+      "Live tutor sessions",
+      "Offline mode"
+    ],
+    isPremium: true
+  }
+]
+
+/**
+ * Renders the pricing page with free and premium tiers.
+ * Redirects to Stripe checkout for premium subscriptions.
+ *
+ * @returns {JSX.Element} The pricing page UI
+ */
 export default async function PricingPage() {
   const { userId } = await auth()
 
-  const features = [
-    "All core features",
-    "Priority support",
-    "Advanced analytics",
-    "Custom integrations",
-    "API access",
-    "Team collaboration"
-  ]
-
-  return (
-    <div className="container mx-auto max-w-5xl px-4 py-12">
-      <div className="mx-auto mb-12 max-w-2xl text-center">
-        <h1 className="mb-4 text-4xl font-bold">Simple, Transparent Pricing</h1>
-        <p className="text-muted-foreground">
-          Choose the plan that best fits your needs. All plans include a 14-day
-          free trial.
-        </p>
-      </div>
-
-      <div className="mx-auto grid max-w-4xl grid-cols-1 gap-8 md:grid-cols-2">
-        <PricingCard
-          title="Monthly Plan"
-          price="$10"
-          description="Perfect for individuals and small teams"
-          buttonText="Subscribe Monthly"
-          buttonLink={
-            process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK_MONTHLY || "#"
+  // Handle Stripe checkout redirect for premium plan
+  async function handlePremiumCheckout() {
+    "use server"
+    try {
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: [
+          {
+            price: process.env.STRIPE_PREMIUM_PRICE_ID, // Set in .env.local
+            quantity: 1
           }
-          features={features}
-          userId={userId}
-          popular={false}
-        />
-        <PricingCard
-          title="Yearly Plan"
-          price="$100"
-          description="Save 17% with annual billing"
-          buttonText="Subscribe Yearly"
-          buttonLink={process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK_YEARLY || "#"}
-          features={features}
-          userId={userId}
-          popular={true}
-        />
-      </div>
+        ],
+        mode: "subscription",
+        success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?success=true`,
+        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/pricing?canceled=true`,
+        metadata: { userId: userId || "" }
+      })
 
-      <p className="text-muted-foreground mt-8 text-center text-sm">
-        All prices are in USD. Need a custom plan?{" "}
-        <a href="/contact" className="font-medium underline underline-offset-4">
-          Contact us
-        </a>
-      </p>
-    </div>
-  )
-}
-
-interface PricingCardProps {
-  title: string
-  price: string
-  description: string
-  buttonText: string
-  buttonLink: string
-  features: string[]
-  userId: string | null
-  popular: boolean
-}
-
-function PricingCard({
-  title,
-  price,
-  description,
-  buttonText,
-  buttonLink,
-  features,
-  userId,
-  popular
-}: PricingCardProps) {
-  const finalButtonLink = userId
-    ? `${buttonLink}?client_reference_id=${userId}`
-    : buttonLink
+      if (session.url) {
+        return { redirect: session.url }
+      }
+      throw new Error("Failed to create checkout session")
+    } catch (error) {
+      console.error("Error creating checkout session:", error)
+      throw error
+    }
+  }
 
   return (
-    <Card
-      className={cn(
-        "relative flex h-full flex-col",
-        popular && "border-primary shadow-lg"
-      )}
-    >
-      {popular && (
-        <div className="bg-primary text-primary-foreground absolute -top-4 left-1/2 -translate-x-1/2 rounded-full px-3 py-1 text-sm font-medium">
-          Most Popular
-        </div>
-      )}
+    <div className="bg-background min-h-screen py-12">
+      <div className="container mx-auto px-4">
+        <h1 className="text-foreground mb-12 text-center text-4xl font-bold">
+          Choose Your Plan
+        </h1>
 
-      <CardHeader>
-        <CardTitle className="text-2xl">{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
+        <div className="mx-auto grid max-w-4xl grid-cols-1 gap-8 md:grid-cols-2">
+          {pricingTiers.map(tier => (
+            <div
+              key={tier.name}
+              className={`rounded-lg border p-6 shadow-md ${
+                tier.isPremium
+                  ? "border-primary bg-primary/10"
+                  : "border-muted bg-card"
+              }`}
+            >
+              <h2
+                className={`mb-2 text-2xl font-semibold ${
+                  tier.isPremium ? "text-primary" : "text-foreground"
+                }`}
+              >
+                {tier.name}
+              </h2>
+              <p className="text-foreground mb-4 text-3xl font-bold">
+                {tier.price}
+              </p>
+              <p className="text-muted-foreground mb-6">{tier.description}</p>
 
-      <CardContent className="grow">
-        <div className="mb-6 flex items-baseline justify-center gap-x-2">
-          <span className="text-5xl font-bold">{price}</span>
-          <span className="text-muted-foreground">/month</span>
-        </div>
+              <ul className="mb-6 space-y-2">
+                {tier.features.map(feature => (
+                  <li key={feature} className="flex items-center">
+                    <Check
+                      className={`mr-2 size-5 ${
+                        tier.isPremium ? "text-primary" : "text-green-500"
+                      }`}
+                    />
+                    <span className="text-foreground">{feature}</span>
+                  </li>
+                ))}
+              </ul>
 
-        <ul className="space-y-3">
-          {features.map((feature, index) => (
-            <li key={index} className="flex items-center gap-x-2">
-              <Check className="text-primary size-4" />
-              <span className="text-muted-foreground text-sm">{feature}</span>
-            </li>
+              <form
+                onSubmit={async e => {
+                  e.preventDefault() // Prevent the default form submission
+                  const result = await handlePremiumCheckout() // Call the checkout function
+                  if (result && result.redirect) {
+                    window.location.href = result.redirect // Redirect to the checkout URL
+                  }
+                }}
+                className="w-full"
+              >
+                <button
+                  type={tier.isPremium ? "submit" : "button"}
+                  className={`w-full rounded-md py-2 font-medium ${
+                    tier.isPremium
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                  }`}
+                  disabled={!tier.isPremium && !userId}
+                >
+                  {tier.isPremium
+                    ? userId
+                      ? "Get Premium"
+                      : "Sign In to Subscribe"
+                    : "Free Plan"}
+                </button>
+              </form>
+            </div>
           ))}
-        </ul>
-      </CardContent>
-
-      <CardFooter>
-        <Button
-          className={cn(
-            "w-full",
-            popular && "bg-primary text-primary-foreground hover:bg-primary/90"
-          )}
-          asChild
-        >
-          <a
-            href={finalButtonLink}
-            className={cn(
-              "inline-flex items-center justify-center",
-              finalButtonLink === "#" && "pointer-events-none opacity-50"
-            )}
-          >
-            {buttonText}
-          </a>
-        </Button>
-      </CardFooter>
-    </Card>
+        </div>
+      </div>
+    </div>
   )
 }
